@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import hashlib
 import json
 import os
 import sys
@@ -13,16 +12,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mnd.backend import MicroVMBackend  # noqa: E402
+from mnd.launcher import image_reference  # noqa: E402
 from mnd.protocol import CANDIDATES, atomic_json  # noqa: E402
 from mnd.recovery import experiments  # noqa: E402
 
 
 async def main(args):
     root = Path(__file__).resolve().parents[1]
-    project_id = hashlib.sha256(str(root).encode()).hexdigest()[:8]
-    os.environ.setdefault("MSB_HOME", f"/tmp/mnd-{os.getuid()}-{project_id}")
     os.environ["MSB_BACKEND"] = "local"
-    backend = MicroVMBackend(image="mnd:local", memory=args.memory)
+    backend = MicroVMBackend(image=image_reference(), memory=args.memory)
     prefix = "mnd-check-" + uuid.uuid4().hex[:8]
     source, slot = prefix + "-source", prefix + "-slot"
     children = [prefix + f"-child{i}" for i in range(4)]

@@ -381,9 +381,7 @@ class ControlRoom:
                 if not isinstance(speed, int | float) or not 0.1 <= speed <= 16:
                     raise ValueError("Replay speed must be between 0.1 and 16")
             if mode == "live" and not self.live_enabled:
-                raise ValueError(
-                    "Restart the server with --enable-live after building the guest image"
-                )
+                raise ValueError("Restart the server with --enable-live")
             if mode == "live" and not os.environ.get("TYPESAFE_API_KEY"):
                 raise ValueError("TYPESAFE_API_KEY is not configured on the host")
             # The guest image carries no game data, so Mario needs a ROM from the host.
@@ -766,19 +764,19 @@ def graceful_signals():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8877)
-    parser.add_argument("--image", default="mnd:local")
+    parser.add_argument("--image", help="a guest image other than the published one")
     parser.add_argument("--runs", type=Path, default=Path("runs/web"))
     parser.add_argument("--enable-live", action="store_true")
     parser.add_argument("--rom", type=Path, help="Your local Super Mario Bros. NES ROM")
     args = parser.parse_args()
-    # Use a private catalog unless the user explicitly chooses one for image loading.
-    if not os.environ.get("MSB_HOME"):
-        os.environ["MSB_HOME"] = tempfile.mkdtemp(prefix="mnd-home-", dir="/tmp")
+    if not args.image:
+        from .launcher import image_reference  # the launcher imports this module
+
+        args.image = image_reference()
     os.environ["MSB_BACKEND"] = "local"
     room = ControlRoom(args.runs.resolve(), args.image, args.enable_live, args.rom)
     server = Server(("127.0.0.1", args.port), handler(room))
     print(f"Mario Never Dies: http://127.0.0.1:{server.server_port}", flush=True)
-    print(f"MSB_HOME={os.environ['MSB_HOME']}", flush=True)
     graceful_signals()
     try:
         server.serve_forever(poll_interval=0.2)

@@ -368,7 +368,7 @@ def powered(theme):
     """The README's last line: microsandbox in its brand colour, the rest neutral, framed by
     the four corners of a box whose sides are not drawn."""
     p = PALETTE[theme]
-    width, height, inset, arm, size = 580, 84, 3, 6, 27
+    width, height, inset, arm, size = 372, 46, 3, 6, 18
     x0, y0, x1, y1 = inset, inset, width - inset, height - inset
     corners = (
         f"M{x0} {y0 + arm}V{y0}H{x0 + arm}M{x1 - arm} {y0}H{x1}V{y0 + arm}"
@@ -381,7 +381,7 @@ def powered(theme):
         "<title>powered by microsandbox + jev</title>"
         f'<path d="{corners}" fill="none" stroke="{p["muted"]}" stroke-width="1.5" '
         'shape-rendering="crispEdges"/>'
-        f'<text x="{width / 2:g}" y="{height / 2 + 9:g}" text-anchor="middle">'
+        f'<text x="{width / 2:g}" y="{height / 2 + 6:g}" text-anchor="middle">'
         f'<tspan fill="{p["muted"]}">powered by </tspan>'
         f'<tspan fill="{BRAND[theme]}">microsandbox</tspan>'
         f'<tspan fill="{p["muted"]}"> + jev</tspan></text></svg>'

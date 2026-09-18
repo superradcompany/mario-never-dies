@@ -72,12 +72,11 @@ class ImageTests(unittest.TestCase):
             patch.object(launcher, "ROOT", self.root),
             patch.dict(os.environ, {"MSB_HOME": str(self.root / "home")}),
             patch.dict("sys.modules", {"microsandbox": types.SimpleNamespace(Image=image)}),
-            patch.object(launcher.shutil, "which", return_value="/usr/bin/docker"),
         ):
             context.start()
             self.addCleanup(context.stop)
 
-    def test_the_published_image_is_pulled_once_and_never_built(self):
+    def test_the_published_image_is_pulled_once(self):
         launcher = self.launcher
         reference = launcher.image_reference()
         self.assertRegex(reference, r"^ghcr\.io/superradcompany/mnd:deps-[0-9a-f]{12}$")
@@ -85,67 +84,110 @@ class ImageTests(unittest.TestCase):
         def pulled(name):
             self.catalog[name] = types_namespace(name)
 
-        with (
-            patch.object(launcher, "pull", side_effect=pulled) as pull,
-            patch.object(launcher.subprocess, "run") as command,
-        ):
+        with patch.object(launcher, "pull", side_effect=pulled) as pull:
             self.assertEqual(launcher.prepare_image(), reference)
             self.assertEqual(launcher.prepare_image(), reference)
-            # Editing the demo's code is not a reason to fetch or build anything.
+            # Editing the demo's code is not a reason to fetch anything.
             (self.root / "mnd/guest.py").write_text("second")
             self.assertEqual(launcher.prepare_image(), reference)
             self.assertEqual(pull.call_count, 1)
-            command.assert_not_called()
             # A different Dockerfile is a different image.
             (self.root / "image/Dockerfile").write_text("second")
             self.assertNotEqual(launcher.prepare_image(), reference)
             self.assertEqual(pull.call_count, 2)
 
-    def test_without_the_registry_it_builds_here_and_keeps_earlier_imports(self):
+    def test_an_image_that_cannot_be_pulled_stops_the_launch_and_says_why(self):
         launcher = self.launcher
         with (
-            patch.object(launcher, "pull", side_effect=RuntimeError("manifest unknown")),
-            patch.object(launcher.subprocess, "run") as command,
-        ):
-            first = launcher.prepare_image()
-            self.assertTrue(first.startswith("mnd:deps-"))
-            self.assertEqual(launcher.prepare_image(), first)
-            self.assertEqual(command.call_count, 2)  # docker build, docker save
-            self.assertEqual(command.call_args_list[0].args[0][-1], "image")  # no code in context
-            (self.root / "mnd/guest.py").write_text("second")
-            self.assertEqual(launcher.prepare_image(), first)
-            self.assertEqual(command.call_count, 2)
-            (self.root / "image/Dockerfile").write_text("second")
-            second = launcher.prepare_image()
-            self.assertNotEqual(first, second)
-            self.assertIn(first, self.catalog)
-            (self.root / "image/Dockerfile").write_text("first")
-            self.assertEqual(launcher.prepare_image(), first)
-            del self.catalog[first]
-            third = launcher.prepare_image()
-            self.assertNotIn(third, (first, second))
-            self.assertIn(second, self.catalog)
-
-    def test_without_the_registry_or_docker_it_says_so(self):
-        launcher = self.launcher
-        with (
-            patch.object(launcher, "pull", side_effect=RuntimeError("Not authorized")),
-            patch.object(launcher.shutil, "which", return_value=None),
-            patch.object(launcher.subprocess, "run") as command,
+            patch.object(launcher, "pull", side_effect=RuntimeError("Not authorized: url …")),
             self.assertRaises(SystemExit) as stopped,
         ):
             launcher.prepare_image()
-        self.assertIn("Docker is only this fallback", str(stopped.exception))
-        command.assert_not_called()
+        message = str(stopped.exception)
+        self.assertIn("Not authorized", message)
+        self.assertIn("the package is private", message)
+        self.assertEqual(self.catalog, {})  # and nothing is built here instead
 
-    def test_build_image_skips_the_registry(self):
-        launcher = self.launcher
-        with (
-            patch.object(launcher, "pull") as pull,
-            patch.object(launcher.subprocess, "run"),
-        ):
-            self.assertTrue(launcher.prepare_image(build=True).startswith("mnd:deps-"))
-            pull.assert_not_called()
+
+class PullProgressTests(unittest.TestCase):
+    """The events are the ones msb sends for the published image: seven layers, side by side."""
+
+    class Screen:
+        def __init__(self, terminal):
+            self.terminal, self.text = terminal, ""
+
+        def isatty(self):
+            return self.terminal
+
+        def write(self, text):
+            self.text += text
+
+        def flush(self):
+            pass
+
+    def replay(self, terminal):
+        import types
+
+        from mnd.launcher import PullProgress
+
+        now = [0.0]
+        screen = self.Screen(terminal)
+        progress = PullProgress(screen, clock=lambda: now[0])
+
+        def send(kind, **fields):
+            blank = dict.fromkeys(
+                (
+                    "total_download_bytes",
+                    "layer_count",
+                    "layer_index",
+                    "downloaded_bytes",
+                    "total_bytes",
+                )
+            )
+            progress.event(
+                types.SimpleNamespace(
+                    event_type=types.SimpleNamespace(value=kind), **blank | fields
+                )
+            )
+
+        send("resolved", layer_count=2, total_download_bytes=200_000_000)
+        for second in range(1, 101):  # two layers at 1 MB/s each, reporting half a second apart
+            for layer in (0, 1):
+                now[0] = second + layer / 2
+                send(
+                    "layer_download_progress",
+                    layer_index=layer,
+                    downloaded_bytes=second * 1_000_000,
+                    total_bytes=100_000_000,
+                )
+            if second == 50:
+                halfway = screen.text
+        for layer in (0, 1):
+            send("layer_download_complete", layer_index=layer, downloaded_bytes=100_000_000)
+        send("stitch_merging_trees", layer_count=2)
+        send("complete", layer_count=2)
+        return halfway, screen.text
+
+    def test_a_terminal_gets_one_line_that_fills(self):
+        halfway, text = self.replay(terminal=True)
+        last = halfway.split("\r")[-1]
+        self.assertIn(" 50%", last)
+        self.assertIn("100 / 200 MB", last)
+        self.assertIn("2.0 MB/s", last)
+        self.assertIn("50s left", last)
+        self.assertEqual(last.count("█"), 12)
+        self.assertEqual(text.count("\n"), 1)  # one line, redrawn; the newline comes at the end
+        self.assertIn("200 MB in 1m 40s · 2 layers", text)
+
+    def test_a_log_gets_a_line_every_ten_percent(self):
+        _, text = self.replay(terminal=False)
+        lines = text.splitlines()
+        self.assertNotIn("\r", text)
+        self.assertEqual(
+            [line.split("%")[0].strip() for line in lines[:10]],
+            [str(n) for n in range(10, 101, 10)],
+        )
+        self.assertEqual(lines[-1].strip(), "200 MB in 1m 40s · 2 layers")
 
 
 def types_namespace(reference):

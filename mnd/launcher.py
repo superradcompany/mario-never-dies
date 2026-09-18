@@ -2,15 +2,17 @@
 
 import argparse
 import asyncio
+import collections
 import contextlib
 import fcntl
 import hashlib
 import io
 import json
 import os
-import shutil
-import subprocess
+import sys
+import tempfile
 import threading
+import time
 import urllib.request
 import uuid
 import webbrowser
@@ -19,6 +21,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from .backend import msb_home
 from .web import ControlRoom, Server, graceful_signals, handler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,23 +57,118 @@ def image_reference() -> str:
     return f"{IMAGE}:deps-{digest[:12]}"
 
 
+def span(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    return f"{seconds // 60}m {seconds % 60:02d}s" if seconds >= 60 else f"{seconds}s"
+
+
+class PullProgress:
+    """The pull as one line that fills while the layers arrive: how much, how fast, how long
+    is left. Layers download side by side, so the line adds them up. When the output is not a
+    terminal (a log, a pipe) it prints a plain line every ten percent instead."""
+
+    WIDTH = 24
+
+    def __init__(self, stream=None, clock=time.monotonic):
+        self.stream = stream or sys.stdout
+        self.clock = clock
+        self.live = self.stream.isatty()
+        self.started = clock()
+        self.total = 0
+        self.layers = 0
+        self.got = {}  # bytes so far, per layer
+        self.size = {}  # a layer's size, for when the manifest gave no total
+        self.finished = set()
+        self.window = collections.deque()  # (time, bytes) for the speed of the last seconds
+        self.drawn = -1.0
+        self.step = 0
+
+    def event(self, event):
+        kind = event.event_type.value
+        if kind == "resolved":
+            self.total = event.total_download_bytes or 0
+            self.layers = event.layer_count or 0
+        elif kind in ("layer_download_progress", "layer_download_complete"):
+            self.got[event.layer_index] = event.downloaded_bytes or 0
+            if event.total_bytes:
+                self.size[event.layer_index] = event.total_bytes
+            if kind == "layer_download_complete":
+                self.finished.add(event.layer_index)
+            self.draw(force=kind == "layer_download_complete")
+        elif kind == "stitch_merging_trees":
+            self.line("  assembling the disk…")
+        elif kind == "complete":
+            self.done()
+
+    def draw(self, force=False):
+        now = self.clock()
+        done = sum(self.got.values())
+        total = max(self.total or sum(self.size.values()), done, 1)
+        self.window.append((now, done))
+        while len(self.window) > 2 and now - self.window[0][0] > 20:
+            self.window.popleft()
+        if not self.live:
+            if done * 10 // total > self.step:
+                self.step = done * 10 // total
+                self.line(f"  {self.step * 10:3d}%  {done / 1e6:.0f} / {total / 1e6:.0f} MB")
+            return
+        if not force and now - self.drawn < 0.1:
+            return
+        self.drawn = now
+        (t0, b0), (t1, b1) = self.window[0], self.window[-1]
+        speed = (b1 - b0) / (t1 - t0) if t1 > t0 else 0
+        # The speed is the last seconds'; the time left uses the whole pull so far, which a slow
+        # or bursty line does not throw around.
+        elapsed = now - self.started
+        steady = done / elapsed if elapsed >= 5 else 0
+        filled = self.WIDTH * done // total
+        text = (
+            f"  {'█' * filled}{'░' * (self.WIDTH - filled)} {done * 100 // total:3d}%"
+            f"  {done / 1e6:.0f} / {total / 1e6:.0f} MB"
+            f"  {len(self.finished)}/{self.layers or len(self.size)} layers"
+        )
+        if speed > 0:
+            text += f"  {speed / 1e6:.1f} MB/s" if speed >= 1e6 else f"  {speed / 1e3:.0f} KB/s"
+        if steady > 0 and done < total:
+            text += f"  {span((total - done) / steady)} left"
+        self.line(text)
+
+    def line(self, text):
+        if self.live:
+            self.stream.write(f"\r{text}\x1b[K")  # over the last one, clearing what is left of it
+        else:
+            self.stream.write(text + "\n")
+        self.stream.flush()
+
+    def done(self):
+        total = sum(self.got.values())
+        took = span(self.clock() - self.started)
+        self.line(f"  {total / 1e6:.0f} MB in {took} · {self.layers or len(self.got)} layers")
+        if self.live:
+            self.stream.write("\n")
+            self.stream.flush()
+
+
 def pull(reference: str):
     """The SDK pulls when a sandbox is created, so a throwaway one brings the image in."""
-    from microsandbox import PullEventType, PullPolicy, Sandbox
+    from microsandbox import PullPolicy, Sandbox
 
     async def run():
         name = f"mnd-pull-{uuid.uuid4().hex[:10]}"
         session = Sandbox.create_with_progress(
             name, image=reference, cpus=1, memory=126, pull_policy=PullPolicy.IF_MISSING
         )
+        progress = PullProgress()
         try:
             async with session:
                 async for event in session.progress:
-                    if event.event_type is PullEventType.RESOLVED:
-                        size = (event.total_download_bytes or 0) / 1e6
-                        print(f"  {event.layer_count} layers, {size:.0f} MB", flush=True)
+                    progress.event(event)
                 sandbox = await session.result()
             await sandbox.stop()
+        except BaseException:
+            if progress.live:
+                print(flush=True)  # leave the half-drawn line and start the error on its own
+            raise
         finally:
             with contextlib.suppress(Exception):  # nothing to remove if the pull failed
                 await Sandbox.remove(name)
@@ -78,86 +176,30 @@ def pull(reference: str):
     asyncio.run(run())
 
 
-def prepare_image(build: bool = False) -> str:
+def prepare_image() -> str:
+    """The guest image comes from the registry, once: the catalog keeps it after that."""
     from microsandbox import Image
 
-    home = Path(os.environ["MSB_HOME"])
-    home.mkdir(parents=True, exist_ok=True)
-    # Serialize launchers sharing a catalog, including their cache publication.
-    with (home / "image-build.lock").open("a") as lock:
+    # Serialize launchers sharing msb's home: one of them pulls, the rest find it there. The
+    # lock lives outside that home, which is msb's to fill.
+    home = hashlib.sha256(str(msb_home()).encode()).hexdigest()[:12]
+    with (Path(tempfile.gettempdir()) / f"mnd-image-{home}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         reference = image_reference()
-        tag = reference.rsplit(":", 1)[1]
-        handles = invoke(Image.list)
-        if not build and any(h.reference == reference for h in handles):
+        if any(h.reference == reference for h in invoke(Image.list)):
             return reference
-        local = built(home, tag, handles)
-        if local:
-            return local
-        if not build:
-            print(f"Pulling the guest image {reference}…", flush=True)
-            try:
-                pull(reference)
-                return reference
-            except Exception as error:
-                reason = str(error).strip().splitlines()[-1][:200] if str(error).strip() else "?"
-                print(f"  could not pull it: {reason}", flush=True)
-                print("  Docker is the fallback: building the same image here instead.", flush=True)
-        return build_image(home, tag)
-
-
-def built(home: Path, tag: str, handles) -> str | None:
-    """An image this machine already built from the same Dockerfile, if it is still there."""
-    stamp = home / "image-builds" / f"{tag}.json"
-    if not stamp.exists():
-        return None
-    record = json.loads(stamp.read_text())
-    # Image.list is local-only. A source stamp alone does not prove that
-    # the imported image survived cache removal or external retagging.
-    present = any(
-        h.manifest_digest == record["manifest_digest"] and h.reference == record["reference"]
-        for h in handles
-    )
-    return record["reference"] if present else None
-
-
-def build_image(home: Path, tag: str) -> str:
-    """The same image, built on this machine: for an edited Dockerfile, or no registry."""
-    from microsandbox import Image
-
-    stamps = home / "image-builds"
-    stamps.mkdir(exist_ok=True)
-    stamp = stamps / f"{tag}.json"
-    # Never reuse a tag for a new import, even after cache loss or a rebuild
-    # with an unchanged Dockerfile but changed base/dependencies. Keep old imports:
-    # paused checkpoints and other running servers may still depend on them.
-    reference = f"mnd:{tag}-{uuid.uuid4().hex[:12]}"
-    cache = ROOT / "runs" / "setup"
-    cache.mkdir(parents=True, exist_ok=True)
-    archive = cache / f"{reference.split(':')[1]}.tar"
-    if not shutil.which("docker"):
-        raise SystemExit(
-            f"The guest image {IMAGE} could not be pulled, and Docker is not installed to build "
-            "it here. Docker is only this fallback: publish the image, or install Docker."
-        )
-    print(f"Building the guest image {reference}…", flush=True)
-    subprocess.run(
-        ["docker", "build", "-f", "image/Dockerfile", "-t", reference, "image"],
-        cwd=ROOT,
-        check=True,
-    )
-    try:
-        subprocess.run(["docker", "save", "-o", str(archive), reference], check=True)
-        invoke(Image.load, str(archive), tag=reference)
-        handle = invoke(Image.get, reference)
-        # Store the SDK's canonical reference for comparisons with Image.list.
-        record = {"reference": handle.reference, "manifest_digest": handle.manifest_digest}
-        temporary = stamp.with_suffix(".tmp")
-        temporary.write_text(json.dumps(record) + "\n")
-        temporary.replace(stamp)
-        return record["reference"]
-    finally:
-        archive.unlink(missing_ok=True)
+        print(f"Pulling the guest image {reference}…", flush=True)
+        try:
+            pull(reference)
+        except Exception as error:
+            reason = str(error).strip().splitlines()[-1][:200] if str(error).strip() else "?"
+            raise SystemExit(
+                f"The guest image could not be pulled: {reason}\n"
+                "CI publishes it from image/Dockerfile (.github/workflows/mnd-image.yml), one tag "
+                "per version of that file. An edited Dockerfile has no image until it is pushed; "
+                "'not authorized' means the package is private."
+            ) from None
+        return reference
 
 
 def packaged_rom() -> Path | None:
@@ -193,20 +235,12 @@ def main():
     parser.add_argument("--port", type=int, default=8877)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--rom", type=Path, help="your own Super Mario Bros. NES ROM")
-    parser.add_argument(
-        "--build-image",
-        action="store_true",
-        help="build image/Dockerfile here with Docker instead of pulling the published image",
-    )
     args = parser.parse_args()
     if not load_key(args.env_file):
         parser.error("Set TYPESAFE_API_KEY, or put it in .env or a file given with --env-file")
-    # A stable private catalog keeps image imports cached and avoids global runtimes.
-    project_id = hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]
-    os.environ["MSB_HOME"] = f"/tmp/mnd-{os.getuid()}-{project_id}"
-    Path(os.environ["MSB_HOME"]).mkdir(mode=0o700, parents=True, exist_ok=True)
+    # The machines run here, in msb's own home: MSB_HOME if it is set, its default otherwise.
     os.environ["MSB_BACKEND"] = "local"
-    image = prepare_image(args.build_image)
+    image = prepare_image()
     room = ControlRoom(ROOT / "runs/web", image, True, args.rom or packaged_rom())
     server = Server(("127.0.0.1", args.port), handler(room))
     url = f"http://127.0.0.1:{server.server_port}"
