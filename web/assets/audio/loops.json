@@ -1,0 +1,90 @@
+[
+ {
+  "id": "overworld",
+  "title": "sunny side up",
+  "file": "overworld.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 52.20188,
+  "bpm": 149.8,
+  "bars": 32,
+  "seconds": 51.2,
+  "role": "world x-1 and the default"
+ },
+ {
+  "id": "underground",
+  "title": "pipe works",
+  "file": "underground.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 37.92748,
+  "bpm": 103.88,
+  "bars": 16,
+  "seconds": 36.93,
+  "role": "world x-2"
+ },
+ {
+  "id": "sky",
+  "title": "cloud run",
+  "file": "sky.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 45.65404,
+  "bpm": 172.24,
+  "bars": 32,
+  "seconds": 44.65,
+  "role": "world x-3"
+ },
+ {
+  "id": "castle",
+  "title": "the last keep",
+  "file": "castle.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 31.47757,
+  "bpm": 126.07,
+  "bars": 16,
+  "seconds": 30.48,
+  "role": "world x-4"
+ },
+ {
+  "id": "fork",
+  "title": "four futures",
+  "file": "fork.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 28.8498,
+  "bpm": 139.7,
+  "bars": 16,
+  "seconds": 27.85,
+  "role": "while four machines race"
+ },
+ {
+  "id": "victory",
+  "title": "nothing was lost",
+  "file": "victory.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 30.08807,
+  "bpm": 132.09,
+  "bars": 16,
+  "seconds": 29.09,
+  "role": "the run cleared"
+ },
+ {
+  "id": "lofi",
+  "title": "save state",
+  "file": "lofi.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 47.83116,
+  "bpm": 82.04,
+  "bars": 16,
+  "seconds": 46.83,
+  "role": "by hand"
+ },
+ {
+  "id": "synthwave",
+  "title": "neon sandbox",
+  "file": "synthwave.mp3",
+  "loopStart": 1.0,
+  "loopEnd": 35.28036,
+  "bpm": 112.04,
+  "bars": 16,
+  "seconds": 34.28,
+  "role": "by hand"
+ }
+]

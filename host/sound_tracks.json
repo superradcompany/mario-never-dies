@@ -1,0 +1,74 @@
+[
+ {
+  "id": "overworld",
+  "title": "sunny side up",
+  "role": "world x-1 and the default",
+  "bpm": 150,
+  "bars": 32,
+  "ms": 84000,
+  "prompt": "Original 8-bit chiptune platformer theme, instrumental, 150 BPM, C major. A bouncy syncopated pulse-wave lead with an instantly hummable eight-bar A phrase and a contrasting eight-bar B phrase that keep alternating, walking triangle-wave bass, crisp noise-channel hi-hats and snare, playful call-and-response between two square-wave voices. The same arrangement and energy throughout: no drum fills, no breakdown, no key change, no intro, no outro, no fade out. Sunny, cheerful, adventurous, full of momentum. Retro game console sound chip, clean and punchy. A seamless loop."
+ },
+ {
+  "id": "underground",
+  "title": "pipe works",
+  "role": "world x-2",
+  "bpm": 104,
+  "bars": 16,
+  "ms": 52000,
+  "prompt": "Original 8-bit chiptune cave theme, instrumental, 104 BPM, A minor. A sparse, funky triangle-wave bass riff with deliberate rests, staccato square-wave stabs answered by a slap-back echo, soft noise-channel shaker and rim clicks. Sneaky, subterranean, cool and a little mischievous, lots of space between the notes. Constant groove from the first beat: no intro, no breakdown, no outro, no fade out. Written as a seamless 16-bar loop whose last bar leads straight back into the first. Retro game console sound chip, dry and close."
+ },
+ {
+  "id": "sky",
+  "title": "cloud run",
+  "role": "world x-3",
+  "bpm": 172,
+  "bars": 32,
+  "ms": 58000,
+  "prompt": "Original 8-bit chiptune athletic stage theme, instrumental, 172 BPM, F major. Breathless rapid arpeggios, a soaring pulse-wave lead with fast vibrato, bright harmonised thirds, driving noise-channel breakbeat drums and a galloping triangle bass. Exhilarating, airborne, sprinting across high platforms in the clouds. Constant full energy from the first beat: no intro, no breakdown, no outro, no fade out. Written as a seamless 32-bar loop whose last bar leads straight back into the first. Retro game console sound chip, crisp and sparkling."
+ },
+ {
+  "id": "castle",
+  "title": "the last keep",
+  "role": "world x-4",
+  "bpm": 126,
+  "bars": 16,
+  "ms": 46000,
+  "prompt": "Original 8-bit chiptune fortress theme, instrumental, 126 BPM, D minor. An ominous chromatic bass ostinato on triangle wave, tense tritone stabs from two detuned square waves, a relentless marching snare on the noise channel, low rumbling drones. Dread, heat and urgency, the final stronghold, danger in every corridor. Constant tension from the first beat: no intro, no breakdown, no outro, no fade out. Written as a seamless 16-bar loop whose last bar leads straight back into the first. Retro game console sound chip with a dark synth pad underneath."
+ },
+ {
+  "id": "fork",
+  "title": "four futures",
+  "role": "while four machines race",
+  "bpm": 140,
+  "bars": 16,
+  "ms": 42000,
+  "prompt": "Original suspense chiptune, instrumental, 140 BPM, E minor. Four interleaved pulse-wave arpeggio voices panned across the stereo field that answer each other like four parallel attempts at the same phrase, a ticking clock percussion pattern, pulsing synthwave sub bass, rising filtered tension that never resolves. A race between four possible futures, urgent, focused, electric. Constant intensity from the first beat: no intro, no breakdown, no outro, no fade out. Written as a seamless 16-bar loop whose last bar leads straight back into the first. 8-bit leads over a modern analog bass."
+ },
+ {
+  "id": "victory",
+  "title": "nothing was lost",
+  "role": "the run cleared",
+  "bpm": 132,
+  "bars": 16,
+  "ms": 44000,
+  "prompt": "Original triumphant 8-bit chiptune celebration theme, instrumental, 132 BPM, G major. A bright fanfare-like pulse-wave melody in parallel sixths, bouncing octave triangle bass, celebratory noise-channel snare rolls and crash accents, sparkling high arpeggio flourishes. Joyful, victorious, the level is cleared and nothing was lost. Constant festive energy from the first beat: no intro, no breakdown, no outro, no fade out. Written as a seamless 16-bar loop whose last bar leads straight back into the first. Retro game console sound chip."
+ },
+ {
+  "id": "lofi",
+  "title": "save state",
+  "role": "by hand",
+  "bpm": 82,
+  "bars": 16,
+  "ms": 72000,
+  "prompt": "Original lo-fi chillhop beat with chiptune melody, instrumental, 82 BPM, E flat major. One steady four-chord progression repeated throughout with the same arrangement in every bar: dusty swung boom-bap drums, warm electric piano seventh chords, mellow round sub bass, a gentle 8-bit square-wave melody of eight bars that repeats, vinyl crackle and soft tape wobble. No drum fills, no breaks, no key changes, no intro, no outro, no fade out. Relaxed, nostalgic, late-night coding while a game runs in the corner. A seamless loop."
+ },
+ {
+  "id": "synthwave",
+  "title": "neon sandbox",
+  "role": "by hand",
+  "bpm": 112,
+  "bars": 16,
+  "ms": 72000,
+  "prompt": "Original retro synthwave track with chiptune lead, instrumental, 112 BPM, B minor. One steady four-chord progression repeated throughout with the same arrangement in every bar: gated-reverb snare and punchy kick, a sixteenth-note analog bass arpeggio, warm detuned saw pads, shimmering neon arpeggios, and a bold square-wave chip lead playing a heroic eight-bar melody that repeats. No drum fills, no risers, no drops, no key changes, no intro, no outro, no fade out. Night drive through a neon grid, confident and hypnotic. A seamless loop."
+ }
+]
