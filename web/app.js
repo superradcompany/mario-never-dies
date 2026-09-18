@@ -757,6 +757,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Enter' && view?.intermission && !exporting && !event.target.closest('button, .menu')) { event.preventDefault(); control({action: 'next'}); return; }
   if (event.key === 'm' && !event.metaKey && !event.ctrlKey && !event.altKey && window.MarioSound) { MarioSound.toggle(); showSoundChoice(); syncSound(); return; }
   if (event.key === 'r' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); if (recording) stopRecording(); else startRecording(); return; }
+  if (event.key === 'f' && !event.metaKey && !event.ctrlKey && !event.altKey && !$('tp-fullscreen').hidden) { event.preventDefault(); toggleFullscreen(); return; }
   if (event.key === ' ') {
     event.preventDefault();
     if (event.repeat) return;
@@ -3650,6 +3651,28 @@ function renderRecording() {
 }
 $('tp-record').onclick = () => startRecording();
 $('tp-record-stop').onclick = () => stopRecording();
+
+// ---------------------------------------------------------------- fullscreen
+//
+// The page itself fills the screen: the game, the timeline and the dock, without the browser
+// around them. f does the same; esc is the browser's own way out.
+const fullscreenOn = () => Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+function toggleFullscreen() {
+  const root = document.documentElement;
+  const call = fullscreenOn() ? (document.exitFullscreen || document.webkitExitFullscreen)?.call(document) : (root.requestFullscreen || root.webkitRequestFullscreen)?.call(root);
+  call?.catch?.(() => {});                                  // refused (an embedded page): nothing to do
+}
+function renderFullscreen() {
+  const on = fullscreenOn(), button = $('tp-fullscreen'), label = on ? 'leave fullscreen · f' : 'fullscreen · f';
+  button.setAttribute('aria-pressed', String(on));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  $('ic-full').toggleAttribute('hidden', on);
+  $('ic-unfull').toggleAttribute('hidden', !on);
+}
+$('tp-fullscreen').hidden = !(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+$('tp-fullscreen').onclick = () => toggleFullscreen();
+for (const name of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(name, renderFullscreen);
 
 // ---------------------------------------------------------------- render loop
 

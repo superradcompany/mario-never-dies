@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import threading
 import urllib.request
@@ -100,7 +101,8 @@ def prepare_image(build: bool = False) -> str:
                 return reference
             except Exception as error:
                 reason = str(error).strip().splitlines()[-1][:200] if str(error).strip() else "?"
-                print(f"  not available ({reason}). Building it here with Docker.", flush=True)
+                print(f"  could not pull it: {reason}", flush=True)
+                print("  Docker is the fallback: building the same image here instead.", flush=True)
         return build_image(home, tag)
 
 
@@ -133,6 +135,11 @@ def build_image(home: Path, tag: str) -> str:
     cache = ROOT / "runs" / "setup"
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / f"{reference.split(':')[1]}.tar"
+    if not shutil.which("docker"):
+        raise SystemExit(
+            f"The guest image {IMAGE} could not be pulled, and Docker is not installed to build "
+            "it here. Docker is only this fallback: publish the image, or install Docker."
+        )
     print(f"Building the guest image {reference}…", flush=True)
     subprocess.run(
         ["docker", "build", "-f", "image/Dockerfile", "-t", reference, "image"],

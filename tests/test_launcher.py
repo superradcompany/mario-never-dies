@@ -72,6 +72,7 @@ class ImageTests(unittest.TestCase):
             patch.object(launcher, "ROOT", self.root),
             patch.dict(os.environ, {"MSB_HOME": str(self.root / "home")}),
             patch.dict("sys.modules", {"microsandbox": types.SimpleNamespace(Image=image)}),
+            patch.object(launcher.shutil, "which", return_value="/usr/bin/docker"),
         ):
             context.start()
             self.addCleanup(context.stop)
@@ -124,6 +125,18 @@ class ImageTests(unittest.TestCase):
             third = launcher.prepare_image()
             self.assertNotIn(third, (first, second))
             self.assertIn(second, self.catalog)
+
+    def test_without_the_registry_or_docker_it_says_so(self):
+        launcher = self.launcher
+        with (
+            patch.object(launcher, "pull", side_effect=RuntimeError("Not authorized")),
+            patch.object(launcher.shutil, "which", return_value=None),
+            patch.object(launcher.subprocess, "run") as command,
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            launcher.prepare_image()
+        self.assertIn("Docker is only this fallback", str(stopped.exception))
+        command.assert_not_called()
 
     def test_build_image_skips_the_registry(self):
         launcher = self.launcher

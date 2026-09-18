@@ -1,4 +1,4 @@
-# Mario Never Dies
+<h1 align="center">Mario Never Dies</h1>
 
 <p align="center">
   <img alt="The map of one run: a lime line that survived from start to finish, with every future that was thrown away fanning off it to a red cross." src="diagrams/map.svg" width="100%">
@@ -18,6 +18,10 @@ Needs Python 3.13+, uv, and a microsandbox-supported host. Export `TYPESAFE_API_
 uv run mnd
 ```
 
+<p align="center">
+  <img alt="Thirty seconds of Mario Never Dies gameplay with its branching timeline." src="diagrams/gameplay-black.gif" width="100%">
+</p>
+
 ## How it works
 
 ### Checkpoint: keep a frozen copy
@@ -31,7 +35,7 @@ Every 150 game frames, microsandbox **snapshots the entire VM running Mario**, k
   </picture>
 </p>
 
-The copy is the whole machine: the emulator process, the game's RAM, the Python state and the filesystem. It is not a screenshot or a save file.
+The copy is the whole machine: the emulator process, the game's RAM, the Python state, the filesystem, everything. It is not a save file.
 
 ### Death: split into four verses
 

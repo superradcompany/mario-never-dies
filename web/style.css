@@ -60,6 +60,9 @@ kbd { font: 500 11px var(--pixel); padding: 1px 5px; border: 1px solid var(--lin
 .leave { position: absolute; left: 0; top: calc(100% + 10px); z-index: 30; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; color: var(--ink-2); white-space: nowrap; }
 .leave[hidden] { display: none; }
 .leave button { height: 30px; padding-top: 0; padding-bottom: 0; }
+/* the page fills the screen, not a black box around it. two rules: one unknown selector would void a shared one */
+html:fullscreen { background: var(--bg); }
+html:-webkit-full-screen { background: var(--bg); }
 .tb.rec-stop:not(:disabled) { color: var(--red); }
 .tb.rec-stop:not(:disabled):hover { border-color: var(--red-dim); }
 .wm { font: 500 20px/1 var(--display); letter-spacing: -.01em; }
