@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import shlex
 import time
 import zipfile
@@ -13,6 +14,12 @@ from pathlib import Path
 from .protocol import TERMINAL, identifier
 
 GUEST_CODE = "/opt/mnd.zip"
+
+
+def msb_home() -> Path:
+    """Where msb keeps its images and sandboxes: MSB_HOME as given, or its own default. The demo
+    does not pick a home of its own."""
+    return Path(os.environ.get("MSB_HOME") or Path.home() / ".microsandbox")
 
 
 def guest_code() -> bytes:
@@ -41,7 +48,7 @@ def sdk():
         name for name in ("branch", "branch_many", "pause", "resume") if not hasattr(Sandbox, name)
     ]
     if missing:
-        raise RuntimeError(f"This microsandbox SDK lacks {', '.join(missing)}; use 0.7.1 or newer")
+        raise RuntimeError(f"This microsandbox SDK lacks {', '.join(missing)}; use 0.7.2 or newer")
     return Sandbox, Volume
 
 

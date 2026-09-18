@@ -8,13 +8,12 @@ import json
 import math
 import os
 import statistics
-import tempfile
 import time
 import traceback
 import uuid
 from pathlib import Path
 
-from .backend import MicroVMBackend
+from .backend import MicroVMBackend, msb_home
 from .protocol import atomic_json
 
 PROBE = """import json, os, time, uuid, urllib.request
@@ -56,8 +55,6 @@ async def measure(args):
     shared = output / "shared"
     shared.mkdir()
     (shared / "marker").write_text("branch-visible", encoding="utf-8")
-    if not os.environ.get("MSB_HOME"):
-        os.environ["MSB_HOME"] = tempfile.mkdtemp(prefix="mnd-home-", dir="/tmp")
     os.environ["MSB_BACKEND"] = "local"
     backend = MicroVMBackend(image=args.image, memory=args.memory, timeout=180)
     samples = {name: [] for name in ("branch", "pause", "branch_paused", "resume", "read", "kill")}
@@ -66,7 +63,7 @@ async def measure(args):
         "simulated": False,
         "memory_mib": args.memory,
         "image": args.image,
-        "msb_home": os.environ["MSB_HOME"],
+        "msb_home": str(msb_home()),
         "checks": [],
         "network_probe": args.network_url,
         "bind_mount_check": args.check_bind_mount,

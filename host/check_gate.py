@@ -5,14 +5,13 @@ import asyncio
 import json
 import os
 import sys
-import tempfile
 import time
 import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mnd.backend import MicroVMBackend  # noqa: E402
+from mnd.backend import MicroVMBackend, msb_home  # noqa: E402
 from mnd.protocol import atomic_json  # noqa: E402
 
 PROBE = """import os,uuid
@@ -29,12 +28,11 @@ while True:
 
 async def check(output):
     output.mkdir(parents=True, exist_ok=False)
-    os.environ.setdefault("MSB_HOME", tempfile.mkdtemp(prefix="mnd-gate-", dir="/tmp"))
     os.environ["MSB_BACKEND"] = "local"
     backend = MicroVMBackend(image="python:3.13-slim", timeout=180)
     prefix = "mnd-gate-" + uuid.uuid4().hex[:8]
     source, slot = prefix + "-source", prefix + "-slot"
-    report = {"status": "running", "msb_home": os.environ["MSB_HOME"], "simulated": False}
+    report = {"status": "running", "msb_home": str(msb_home()), "simulated": False}
 
     async def wait(name, frame):
         deadline = time.monotonic() + 10

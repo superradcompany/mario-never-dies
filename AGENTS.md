@@ -43,7 +43,7 @@ uv run python -m unittest discover -s tests
 uv run ruff check mnd host tests && uv run ruff format --check mnd host tests
 node --check web/app.js && node --test tests/timeline.test.cjs
 uv run python diagrams/render.py      # after editing a diagram
-uv run mnd                     # live; needs TYPESAFE_API_KEY, ffmpeg for video; Docker only with --build-image
+uv run mnd                     # live; needs TYPESAFE_API_KEY, ffmpeg for video
 uv run python -m mnd.web              # replays only; no key, no VMs
 ```
 
