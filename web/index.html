@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>mario never dies</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/GeistPixelSquare.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/GeistPixelCircle.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/timeline.js"></script>
+  <script defer src="/sound.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><button type="button" id="back" class="tb back" hidden aria-label="back to the lobby" title="back to the lobby"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 3h7v1h-7z M1 2h1v1h-1z M1 4h1v1h-1z M2 1h1v1h-1z M2 5h1v1h-1z"/></svg></button><span class="wm"><span data-hero>mario</span> <em>never</em> dies<span class="dot">.</span></span><div class="leave" id="leave" hidden role="alertdialog" aria-label="leave this run"><span>leave this run? every machine stops.</span><button type="button" id="leave-stay" class="ghost">stay</button><button type="button" id="leave-go" class="primary">leave</button></div></div>
+    <div class="world" id="world" aria-live="polite"></div>
+    <div class="counters" id="counters" aria-label="run counters">
+      <div><b id="c-snapshots">0</b><span>snapshots</span></div>
+      <div><b id="c-deaths">0</b><span>deaths</span></div>
+      <div><b id="c-verses">0</b><span>verses</span></div>
+      <div><b id="c-alive">0</b><span>alive</span></div>
+      <div class="rec-cluster"><span id="rec-time" class="rec-time" hidden aria-live="off"></span><button id="tp-record" class="tb rec" aria-label="record the screen · r" title="record the screen · r"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" id="ic-rec"><path d="M2 0h3v1h-3z M1 1h5v1h-5z M0 2h7v3h-7z M1 5h5v1h-5z M2 6h3v1h-3z"/></svg></button><button id="tp-record-stop" class="tb rec-stop" disabled aria-label="stop recording and download" title="stop recording and download"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M1 1h5v5h-5z"/></svg></button><button id="tp-fullscreen" class="tb full" aria-pressed="false" aria-label="fullscreen · f" title="fullscreen · f"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" id="ic-full"><path d="M0 0h2v1h-2z M0 1h1v1h-1z M5 0h2v1h-2z M6 1h1v1h-1z M0 5h1v1h-1z M0 6h2v1h-2z M6 5h1v1h-1z M5 6h2v1h-2z"/></svg><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" id="ic-unfull" hidden><path d="M2 0h1v3h-1z M0 2h2v1h-2z M4 0h1v3h-1z M5 2h2v1h-2z M2 4h1v3h-1z M0 4h2v1h-2z M4 4h1v3h-1z M5 4h2v1h-2z"/></svg></button></div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="stage" id="stage">
+      <div class="frame" id="frame">
+        <div class="screen" id="screen" aria-live="off"></div>
+        <div class="peek" id="peek" hidden>
+          <canvas id="peek-canvas" width="256" height="240" role="img" aria-label="a past frame of this run"></canvas>
+          <div class="peek-tag" id="peek-tag"></div>
+          <div class="peek-hint" id="peek-hint"></div>
+        </div>
+        <div class="wipe" id="wipe" hidden aria-hidden="true"></div>
+        <div class="pop" id="pop" hidden aria-hidden="true"><div class="pop-box"><svg id="pop-glyph" viewBox="0 0 7 7" width="42" height="42" shape-rendering="crispEdges"></svg><span id="pop-text"></span></div></div>
+      </div>
+      <div class="clearcard" id="clearcard" hidden role="dialog" aria-label="world cleared">
+        <div class="cc-bar cc-top"></div>
+        <div class="cc-stamp" id="cc-stamp"></div>
+        <div class="cc-stats" id="cc-stats"></div>
+        <div class="cc-bar cc-bottom">
+          <div class="cc-actions" id="cc-actions">
+            <button type="button" id="cc-next" class="primary">next world →</button>
+            <div class="menu actions up labelled" id="cc-download"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="download" title="download"><svg class="ic" viewBox="0 0 7 7" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true"><path d="M3 0h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M1 2h1v1h-1z M5 2h1v1h-1z M2 3h1v1h-1z M4 3h1v1h-1z M0 6h1v1h-1z M1 6h1v1h-1z M2 6h1v1h-1z M3 6h1v1h-1z M4 6h1v1h-1z M5 6h1v1h-1z M6 6h1v1h-1z"/></svg><span>download</span></button><div class="menu-list" role="listbox" hidden></div></div>
+            <button type="button" id="cc-back" class="ghost">look back</button>
+          </div>
+          <div class="export centered" id="cc-export" hidden><span class="export-label">rendering</span><div class="export-bar"><div class="export-fill"></div></div><button type="button" class="kb export-cancel">cancel</button></div>
+        </div>
+      </div>
+    </section>
+    <div class="deck" id="deck">
+          <div class="jev" id="jev" hidden>
+            <svg class="pad" viewBox="0 0 88 40" aria-hidden="true">
+              <rect x="0" y="0" width="88" height="40" class="pad-body"/>
+              <rect x="16" y="6" width="8" height="28" class="pad-dpad"/>
+              <rect x="6" y="16" width="28" height="8" class="pad-dpad"/>
+              <rect x="6" y="16" width="9" height="8" id="pad-left" class="pad-key"/>
+              <rect x="25" y="16" width="9" height="8" id="pad-right" class="pad-key"/>
+              <rect x="16" y="6" width="8" height="9" id="pad-up" class="pad-key"/>
+              <rect x="16" y="25" width="8" height="9" id="pad-down" class="pad-key"/>
+              <rect x="52" y="14" width="12" height="12" id="pad-b" class="pad-key pad-btn"/>
+              <rect x="70" y="14" width="12" height="12" id="pad-a" class="pad-key pad-btn"/>
+              <text x="58" y="34" class="pad-text">b</text>
+              <text x="76" y="34" class="pad-text">a</text>
+            </svg>
+            <svg class="pad pad-one" viewBox="0 0 58 40" aria-hidden="true">
+              <rect x="0" y="0" width="58" height="40" class="pad-body"/>
+              <rect x="18" y="9" width="22" height="22" id="pad-flap" class="pad-key pad-btn"/>
+            </svg>
+            <div class="move"><span class="who">jev</span><b id="move">—</b><span class="lat" id="latency"></span></div>
+          </div>
+          <div class="transport" id="transport" hidden aria-label="transport">
+            <button id="tp-back" class="tb" aria-label="back 10 s · shift+←" title="back 10 s · shift+←"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 1h1v1h-1z M0 2h1v1h-1z M0 3h1v1h-1z M0 4h1v1h-1z M0 5h1v1h-1z M2 3h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M4 1h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M4 5h1v1h-1z M5 0h1v1h-1z M5 1h1v1h-1z M5 2h1v1h-1z M5 3h1v1h-1z M5 4h1v1h-1z M5 5h1v1h-1z M5 6h1v1h-1z"/></svg></button>
+            <button id="tp-rew" class="tb" aria-label="rewind · ←" title="rewind · ←"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 3h1v1h-1z M1 2h1v1h-1z M1 3h1v1h-1z M1 4h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M4 3h1v1h-1z M5 2h1v1h-1z M5 3h1v1h-1z M5 4h1v1h-1z M6 1h1v1h-1z M6 2h1v1h-1z M6 3h1v1h-1z M6 4h1v1h-1z M6 5h1v1h-1z"/></svg></button>
+            <button id="tp-pause" class="tb" aria-label="pause · space" title="pause · space"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" id="ic-pause"><path d="M1 0h1v1h-1z M1 1h1v1h-1z M1 2h1v1h-1z M1 3h1v1h-1z M1 4h1v1h-1z M1 5h1v1h-1z M1 6h1v1h-1z M2 0h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M2 6h1v1h-1z M4 0h1v1h-1z M4 1h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M4 5h1v1h-1z M4 6h1v1h-1z M5 0h1v1h-1z M5 1h1v1h-1z M5 2h1v1h-1z M5 3h1v1h-1z M5 4h1v1h-1z M5 5h1v1h-1z M5 6h1v1h-1z"/></svg><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" id="ic-play" hidden><path d="M2 0h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M2 6h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M3 5h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M5 3h1v1h-1z"/></svg></button>
+            <button id="tp-ff" class="tb" aria-label="fast-forward · →" title="fast-forward · →"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 1h1v1h-1z M0 2h1v1h-1z M0 3h1v1h-1z M0 4h1v1h-1z M0 5h1v1h-1z M1 2h1v1h-1z M1 3h1v1h-1z M1 4h1v1h-1z M2 3h1v1h-1z M4 1h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M4 5h1v1h-1z M5 2h1v1h-1z M5 3h1v1h-1z M5 4h1v1h-1z M6 3h1v1h-1z"/></svg></button>
+            <button id="tp-skip" class="tb" aria-label="ahead 10 s · shift+→" title="ahead 10 s · shift+→"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M1 0h1v1h-1z M1 1h1v1h-1z M1 2h1v1h-1z M1 3h1v1h-1z M1 4h1v1h-1z M1 5h1v1h-1z M1 6h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M4 3h1v1h-1z M6 1h1v1h-1z M6 2h1v1h-1z M6 3h1v1h-1z M6 4h1v1h-1z M6 5h1v1h-1z"/></svg></button>
+            <button id="stop" class="tb stop" aria-label="stop the run" title="stop the run"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M1 1h1v1h-1z M1 2h1v1h-1z M1 3h1v1h-1z M1 4h1v1h-1z M1 5h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M3 5h1v1h-1z M4 1h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M4 5h1v1h-1z M5 1h1v1h-1z M5 2h1v1h-1z M5 3h1v1h-1z M5 4h1v1h-1z M5 5h1v1h-1z"/></svg></button>
+          </div>
+          <div class="intermission" id="intermission" hidden aria-label="world cleared">
+            <span class="inter-text" id="inter-text"></span>
+            <div class="menu actions up labelled" id="inter-download"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="download" title="download"><svg class="ic" viewBox="0 0 7 7" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true"><path d="M3 0h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M1 2h1v1h-1z M5 2h1v1h-1z M2 3h1v1h-1z M4 3h1v1h-1z M0 6h1v1h-1z M1 6h1v1h-1z M2 6h1v1h-1z M3 6h1v1h-1z M4 6h1v1h-1z M5 6h1v1h-1z M6 6h1v1h-1z"/></svg><span>download</span></button><div class="menu-list" role="listbox" hidden></div></div>
+            <button type="button" id="inter-next" class="primary">next world →</button>
+          </div>
+          <div class="playback" id="playback" hidden aria-label="playback">
+            <button id="tp-canon" class="kb canon" hidden aria-pressed="false" title="watch only the verse that survived">skip deaths</button>
+            <div class="menu sound right" id="tp-sound" title="music · off until you pick one · m toggles" data-value="off"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false"><span class="menu-label">♪ off</span><svg class="caret" viewBox="0 0 7 4" width="9" height="6" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 0h1v1h-1z M6 0h1v1h-1z M1 1h1v1h-1z M5 1h1v1h-1z M2 2h1v1h-1z M4 2h1v1h-1z M3 3h1v1h-1z"/></svg></button><div class="menu-list" role="listbox" hidden><button type="button" role="option" data-value="off" aria-selected="true">♪ off</button></div></div>
+            <div class="menu speed" id="tp-speed" hidden title="playback speed" data-value="1"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false"><span class="menu-label">1×</span><svg class="caret" viewBox="0 0 7 4" width="9" height="6" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 0h1v1h-1z M6 0h1v1h-1z M1 1h1v1h-1z M5 1h1v1h-1z M2 2h1v1h-1z M4 2h1v1h-1z M3 3h1v1h-1z"/></svg></button><div class="menu-list" role="listbox" hidden><button type="button" role="option" data-value="0.5" aria-selected="false">½×</button><button type="button" role="option" data-value="1" aria-selected="true">1×</button><button type="button" role="option" data-value="2" aria-selected="false">2×</button><button type="button" role="option" data-value="4" aria-selected="false">4×</button><button type="button" role="option" data-value="8" aria-selected="false">8×</button></div></div>
+            <button id="tp-now" class="kb now" hidden><i class="beacon"></i><svg viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true" class="arrow"><path d="M0 3h1v1h-1z M1 3h1v1h-1z M2 3h1v1h-1z M3 3h1v1h-1z M4 3h1v1h-1z M5 3h1v1h-1z M4 2h1v1h-1z M4 4h1v1h-1z M3 1h1v1h-1z M3 5h1v1h-1z"/></svg><span id="tp-now-label">live</span></button>
+            <div class="menu actions right icon" id="tp-download" hidden><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="download" title="download"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M3 0h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M1 2h1v1h-1z M5 2h1v1h-1z M2 3h1v1h-1z M4 3h1v1h-1z M0 6h1v1h-1z M1 6h1v1h-1z M2 6h1v1h-1z M3 6h1v1h-1z M4 6h1v1h-1z M5 6h1v1h-1z M6 6h1v1h-1z"/></svg></button><div class="menu-list" role="listbox" hidden><button type="button" role="option" data-value="video"><b>video · mp4</b><small>the run as you watched it, narration burned in</small></button><button type="button" role="option" data-value="cut"><b>video · the canon cut</b><small>only the verse that made it, as one unbroken run</small></button><button type="button" role="option" data-value="zip"><b>recording · zip</b><small>every frame, event and trace; replays on any machine</small></button></div></div>
+            <div class="export " id="export" hidden><span class="export-label">rendering</span><div class="export-bar"><div class="export-fill"></div></div><button type="button" class="kb export-cancel">cancel</button></div>
+          </div>
+    </div>
+
+    <p class="focus" aria-live="polite"><span id="focus"></span><span class="stamp" id="stamp" hidden></span></p>
+
+    <section class="map" id="map-section">
+      <div class="edge edge-row" id="resize-map" role="separator" aria-orientation="horizontal" aria-label="the timeline's height: drag, or use the arrow keys. double click to reset" tabindex="0"></div>
+      <div class="map-wrap">
+        <div class="map-scroll" id="map-scroll"><svg id="map" class="map-svg" role="group" aria-label="the timeline: hover to see where, hold space to scrub, click to pin, scroll to widen"></svg></div>
+        <span class="clock map-clock" id="tp-clock" aria-live="off"></span>
+        <div class="scrub-hint" id="scrub-hint" hidden>hold <kbd>space</kbd> + move to scrub · tap <kbd>space</kbd> to pause · click to pin</div>
+        <button id="tp-markers" class="kb map-chip on" aria-pressed="true" hidden title="show every copy, rewind and fork on the timeline">markers</button>
+        <div class="pin" id="pin" hidden>
+          <span class="pin-label" id="peek-label"></span>
+          <button id="peek-seek" class="primary" hidden>replay from here →</button>
+          <button id="peek-rewind" class="primary" hidden>rewind to this snapshot →</button>
+          <button id="peek-close" class="ghost" aria-label="back to now" title="back to now">×</button>
+        </div>
+      </div>
+      <aside class="dock" id="dock" aria-label="a closer look">
+        <div class="edge edge-col" id="resize-dock" role="separator" aria-orientation="vertical" aria-label="the panel's width: drag, or use the arrow keys. double click to reset" tabindex="0"></div>
+        <div class="dock-tabs" role="tablist" aria-label="a closer look">
+          <button id="tab-moment" role="tab" aria-controls="dock-moment" aria-selected="true" data-tab="moment">decision</button>
+          <button id="tab-futures" role="tab" aria-controls="dock-futures" aria-selected="false" data-tab="futures">verses</button>
+          <button id="tab-multiverse" role="tab" aria-controls="dock-multiverse" aria-selected="false" data-tab="multiverse">multiverse</button>
+          <button id="tab-calls" role="tab" aria-controls="dock-calls" aria-selected="false" data-tab="calls">calls</button>
+        </div>
+        <section id="dock-moment" class="dock-panel" role="tabpanel" aria-labelledby="tab-moment"></section>
+        <section id="dock-futures" class="dock-panel" role="tabpanel" aria-labelledby="tab-futures" hidden></section>
+        <section id="dock-multiverse" class="dock-panel multiverse-panel" role="tabpanel" aria-labelledby="tab-multiverse" hidden>
+          <div class="multiverse-head">
+            <div>
+              <p class="dock-kicker" id="multiverse-kicker"></p>
+              <h3 id="multiverse-count"></h3>
+            </div>
+            <button type="button" id="multiverse-save" class="ghost">save the map</button>
+          </div>
+          <div class="multiverse-stage"><canvas id="multiverse-map" class="multiverse-map" role="img" aria-label="every verse of this run as a branch: a whole machine copied from a snapshot. grey where it collapsed, lime where it became canon"></canvas></div>
+        </section>
+        <section id="dock-calls" class="dock-panel" role="tabpanel" aria-labelledby="tab-calls" hidden><ol class="ops" id="ops" aria-label="microsandbox calls"></ol></section>
+      </aside>
+    </section>
+  </main>
+
+  <div class="overlay select" id="select" hidden>
+    <div class="select-card">
+      <p class="eyebrow pair"><span class="ours">microsandbox</span> <span class="times">×</span> jev</p>
+      <h1>pick what <em>never</em> dies.</h1>
+      <div class="cabinets" id="cabinets">
+        <button type="button" class="cabinet" data-game="mario" aria-label="mario: open its lobby">
+          <span class="cab-screen"><canvas id="cab-mario" width="512" height="480" aria-hidden="true"></canvas></span>
+          <span class="cab-head"><span class="cab-name">mario</span><span class="cab-stats" id="cab-mario-stats"></span></span>
+          <span class="cab-line">twelve moves, four worlds, a flag at the end.</span>
+        </button>
+        <button type="button" class="cabinet" data-game="bird" aria-label="flappy: open its lobby">
+          <span class="cab-screen"><canvas id="cab-bird" class="tall" width="576" height="1024" aria-hidden="true"></canvas></span>
+          <span class="cab-head"><span class="cab-name">flappy</span><span class="cab-stats" id="cab-bird-stats"></span></span>
+          <span class="cab-line">one button. one life. no end.</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay idle" id="idle">
+    <canvas class="attract" id="attract" width="512" height="480" aria-hidden="true"></canvas>
+    <div class="attract-veil" aria-hidden="true"></div>
+    <button type="button" id="to-games" class="to-games">← games</button>
+    <div class="idle-card">
+      <p class="eyebrow pair"><span class="ours">microsandbox</span> <span class="times">×</span> jev</p>
+      <h1><span data-hero>mario</span> <em>never</em> dies.</h1>
+      <div class="launch">
+        <button id="live" class="primary">play live →</button>
+      </div>
+      <p class="hint" id="hint"></p>
+    </div>
+    <div class="shelf" id="shelf" hidden>
+      <div class="shelf-now">
+        <span class="shelf-kicker">now showing</span>
+        <span class="shelf-title" id="shelf-title"></span>
+        <span class="shelf-meta" id="shelf-meta"></span>
+        <div class="shelf-actions" id="shelf-actions">
+          <button type="button" id="watch" class="quiet"><svg class="ic" viewBox="0 0 7 7" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true"><path d="M2 0h1v1h-1z M2 1h1v1h-1z M2 2h1v1h-1z M2 3h1v1h-1z M2 4h1v1h-1z M2 5h1v1h-1z M2 6h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M3 5h1v1h-1z M4 2h1v1h-1z M4 3h1v1h-1z M4 4h1v1h-1z M5 3h1v1h-1z"/></svg>watch it</button>
+          <div class="menu actions up labelled" id="shelf-download"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="download" title="download"><svg class="ic" viewBox="0 0 7 7" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true"><path d="M3 0h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M1 2h1v1h-1z M5 2h1v1h-1z M2 3h1v1h-1z M4 3h1v1h-1z M0 6h1v1h-1z M1 6h1v1h-1z M2 6h1v1h-1z M3 6h1v1h-1z M4 6h1v1h-1z M5 6h1v1h-1z M6 6h1v1h-1z"/></svg><span>download</span></button><div class="menu-list" role="listbox" hidden><button type="button" role="option" data-value="video"><b>video · mp4</b><small>the run as you watched it, narration burned in</small></button><button type="button" role="option" data-value="cut"><b>video · the canon cut</b><small>only the verse that made it, as one unbroken run</small></button><button type="button" role="option" data-value="zip"><b>recording · zip</b><small>every frame, event and trace; replays on any machine</small></button></div></div>
+        </div>
+        <div class="export " id="shelf-export" hidden><span class="export-label">rendering</span><div class="export-bar"><div class="export-fill"></div></div><button type="button" class="kb export-cancel">cancel</button></div>
+      </div>
+      <div class="shelf-strip" id="shelf-strip" aria-label="other recordings"></div>
+    </div>
+  </div>
+
+  <div class="overlay library" id="library" hidden>
+    <div class="library-card" role="dialog" aria-label="all recordings">
+      <div class="library-head"><span class="library-title">recordings</span><span class="library-count" id="library-count"></span><button type="button" id="library-close" class="tb" aria-label="close" title="close · esc"><svg class="ic" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 0h1v1h-1z M1 1h1v1h-1z M2 2h1v1h-1z M3 3h1v1h-1z M4 4h1v1h-1z M5 5h1v1h-1z M6 6h1v1h-1z M6 0h1v1h-1z M5 1h1v1h-1z M4 2h1v1h-1z M2 4h1v1h-1z M1 5h1v1h-1z M0 6h1v1h-1z"/></svg></button></div>
+      <div class="library-grid" id="library-grid"></div>
+      <button type="button" class="library-short" id="library-short" hidden></button>
+    </div>
+  </div>
+
+  <div class="overlay finale" id="finale" hidden>
+    <div class="finale-card">
+      <p class="eyebrow" id="finale-eyebrow"></p>
+      <h1 id="finale-title"></h1>
+      <p class="dek" id="finale-dek"></p>
+      <canvas id="finale-map" class="finale-map" hidden role="img" aria-label="the map of the multiverse: every verse this run created"></canvas>
+      <div class="replay-row" id="finale-actions">
+        <div class="menu actions up cta" id="finale-download"><button type="button" class="menu-btn" aria-haspopup="listbox" aria-expanded="false">download the video<svg class="ic" viewBox="0 0 7 7" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true"><path d="M3 0h1v1h-1z M3 1h1v1h-1z M3 2h1v1h-1z M3 3h1v1h-1z M3 4h1v1h-1z M1 2h1v1h-1z M5 2h1v1h-1z M2 3h1v1h-1z M4 3h1v1h-1z M0 6h1v1h-1z M1 6h1v1h-1z M2 6h1v1h-1z M3 6h1v1h-1z M4 6h1v1h-1z M5 6h1v1h-1z M6 6h1v1h-1z"/></svg></button><div class="menu-list" role="listbox" hidden></div></div>
+        <button type="button" id="again">run again →</button>
+        <button type="button" id="finale-poster" class="ghost" hidden>save the map</button>
+        <button type="button" id="scrub" class="ghost">scrub the timeline</button>
+      </div>
+      <div class="export centered" id="finale-export" hidden><span class="export-label">rendering</span><div class="export-bar"><div class="export-fill"></div></div><button type="button" class="kb export-cancel">cancel</button></div>
+    </div>
+  </div>
+
+  <div class="toast" id="error" role="alert" hidden></div>
+</body>
+</html>

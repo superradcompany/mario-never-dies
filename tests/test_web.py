@@ -1,0 +1,293 @@
+import io
+import json
+import shutil
+import struct
+import subprocess
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+import zipfile
+import zlib
+from pathlib import Path
+from unittest import mock
+
+from mnd.web import ControlRoom, Server, graceful_signals, handler
+from tests.test_replay import make_recording
+
+
+def png(width=16, height=16, shade=0):
+    """A real, tiny PNG: the encoder rejects anything that only looks like one."""
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    rows = b"".join(b"\x00" + bytes([shade, 200, 90]) * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
+class WebTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.room = ControlRoom(Path(self.temp.name), "unused")
+        self.server = Server(("127.0.0.1", 0), handler(self.room))
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.origin = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.room.close()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.temp.cleanup()
+
+    def request(self, path, data=None, origin=None):
+        headers = {"Content-Type": "application/json"}
+        if origin:
+            headers["Origin"] = origin
+        request = urllib.request.Request(self.origin + path, data=data, headers=headers)
+        return urllib.request.urlopen(request, timeout=3)
+
+    def test_state_contains_no_credentials(self):
+        with self.request("/api/state") as response:
+            state = json.load(response)
+        self.assertEqual(state["status"], "idle")
+        self.assertNotIn("TYPESAFE_API_KEY", state)
+
+    def test_foreign_webpage_cannot_start_a_run(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/start", b'{"mode":"simulation"}', "https://untrusted.example")
+        self.assertEqual(error.exception.code, 403)
+        self.assertIsNone(self.room.worker)
+
+    def test_live_execution_requires_explicit_server_configuration(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/start", b'{"mode":"live"}', self.origin)
+        self.assertEqual(error.exception.code, 400)
+        self.assertIsNone(self.room.worker)
+
+    def test_start_and_stop_controls(self):
+        with self.request("/api/start", b'{"mode":"simulation"}', self.origin) as response:
+            self.assertEqual(response.status, 202)
+        with self.request("/api/stop", b"{}", self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.room.worker.join(timeout=3)
+        self.assertEqual(self.room.state()["status"], "stopped")
+
+    def test_a_game_marked_soon_only_starts_as_a_preview(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/start", b'{"mode":"simulation","game":"bird"}', self.origin)
+        self.assertEqual(error.exception.code, 400)
+        self.assertIn("soon", json.load(error.exception)["error"])
+        self.assertIsNone(self.room.worker)
+        body = b'{"mode":"simulation","game":"bird","preview":true}'
+        with self.request("/api/start", body, self.origin) as response:
+            self.assertEqual(response.status, 202)
+        with self.request("/api/stop", b"{}", self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.room.worker.join(timeout=3)
+
+    def test_replay_requires_an_existing_recording(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/start", b'{"mode":"replay","run":"../../etc"}', self.origin)
+        self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/start", b'{"mode":"replay","run":"0123456789ab"}', self.origin)
+        self.assertEqual(error.exception.code, 400)
+        self.assertIsNone(self.room.worker)
+        with self.request("/api/runs") as response:
+            self.assertEqual(json.load(response), [])
+
+    def test_sigterm_is_turned_into_a_graceful_interrupt(self):
+        import os
+        import signal
+
+        previous = signal.getsignal(signal.SIGTERM)
+        try:
+            graceful_signals()
+            with self.assertRaises(KeyboardInterrupt):
+                os.kill(os.getpid(), signal.SIGTERM)
+                signal.pause() if hasattr(signal, "pause") else None
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+    def test_open_streams_do_not_hold_up_shutdown(self):
+        import socket
+
+        client = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=3)
+        client.sendall(b"GET /api/stream HTTP/1.1\r\nHost: x\r\n\r\n")
+        self.assertIn(b"text/event-stream", client.recv(4096))
+        started = time.monotonic()
+        self.room.close()
+        self.server.shutdown()
+        self.server.server_close()
+        self.assertLess(time.monotonic() - started, 5, "shutdown waited on an open stream")
+        client.close()
+
+    def test_schedule_and_stream(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/schedule")
+        self.assertEqual(error.exception.code, 404)
+        with self.request("/api/stream") as response:
+            self.assertEqual(response.headers["Content-Type"], "text/event-stream")
+            first = response.readline().decode()
+            self.assertTrue(first.startswith("data: "))
+            self.assertEqual(json.loads(first[6:])["status"], "idle")
+
+    def test_a_recording_can_be_read_without_replaying_it(self):
+        make_recording(Path(self.temp.name) / "0123456789ab")
+        with self.request("/api/schedule?run=0123456789ab") as response:
+            schedule = json.loads(response.read())
+        self.assertEqual(schedule["events"][0]["type"], "created")
+        self.assertIn("run4", schedule["anchors"])
+        with self.request("/api/frame/run4?f=100&run=0123456789ab") as response:
+            self.assertEqual(response.headers["Content-Type"], "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG"))
+        with self.request("/api/thumb/0123456789ab") as response:
+            self.assertTrue(response.read().startswith(b"\x89PNG"))
+        self.assertEqual(self.room.state()["status"], "idle", "reading must not start a replay")
+        for path in ("/api/schedule?run=../../etc", "/api/thumb/nothere00000", "/api/thumb/0123"):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request(path)
+            self.assertEqual(error.exception.code, 404)
+
+    def test_a_recording_downloads_as_a_zip_that_replays_elsewhere(self):
+        make_recording(Path(self.temp.name) / "0123456789ab")
+        with self.request("/api/download/0123456789ab.zip") as response:
+            self.assertIn("attachment", response.headers["Content-Disposition"])
+            bundle = zipfile.ZipFile(io.BytesIO(response.read()))
+        names = bundle.namelist()
+        self.assertIn("0123456789ab/events.jsonl", names)
+        self.assertIn("0123456789ab/result.json", names)
+        self.assertIn("0123456789ab/timelines/run4/timeline.tar", names)
+        with tempfile.TemporaryDirectory() as elsewhere:
+            bundle.extractall(elsewhere)
+            other = ControlRoom(Path(elsewhere), "unused")
+            self.assertEqual([run["id"] for run in other.runs()], ["0123456789ab"])
+            self.assertEqual(other.schedule("0123456789ab")["events"][-1]["type"], "clear")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/download/ffffffffffff.zip")
+        self.assertEqual(error.exception.code, 404)
+
+    def post(self, path, data, headers):
+        request = urllib.request.Request(
+            self.origin + path, data=data, headers={"Origin": self.origin, **headers}
+        )
+        return urllib.request.urlopen(request, timeout=30)
+
+    def test_rendering_without_an_encoder_says_so(self):
+        with (
+            mock.patch("mnd.web.shutil.which", return_value=None),
+            self.assertRaises(urllib.error.HTTPError) as error,
+        ):
+            self.post("/api/render/start", b'{"fps":30}', {"Content-Type": "application/json"})
+        self.assertEqual(error.exception.code, 501)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg on the host")
+    def test_frames_from_the_page_become_an_mp4(self):
+        json_type = {"Content-Type": "application/json"}
+        with self.post("/api/render/start", b'{"fps":30}', json_type) as response:
+            job = json.loads(response.read())["job"]
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.post(f"/api/render/{job}/frames", b"not a picture", {"X-Frames": "1"})
+        self.assertEqual(error.exception.code, 400)
+        for shade, repeat in ((0, 10), (120, 1), (240, 19)):
+            headers = {"Content-Type": "application/octet-stream", "X-Frames": str(repeat)}
+            self.post(f"/api/render/{job}/frames", png(shade=shade), headers).close()
+        with self.post(f"/api/render/{job}/finish", b"{}", json_type) as response:
+            result = json.loads(response.read())
+        self.assertEqual(result["frames"], 30)
+        with self.request(f"{result['url']}?name=mario-never-dies-test.mp4") as response:
+            self.assertIn("mario-never-dies-test.mp4", response.headers["Content-Disposition"])
+            video = response.read()
+        self.assertEqual(video[4:8], b"ftyp")
+        directory = self.room.renders[job]["directory"]
+        self.post(f"/api/render/{job}/cancel", b"{}", json_type).close()
+        self.assertFalse(directory.exists(), "a cancelled render leaves no files behind")
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg")
+    def test_a_sound_plan_is_mixed_into_the_video(self):
+        json_type = {"Content-Type": "application/json"}
+        with self.post("/api/render/start", b'{"fps":30}', json_type) as response:
+            job = json.loads(response.read())["job"]
+        headers = {"Content-Type": "application/octet-stream", "X-Frames": "90"}
+        self.post(f"/api/render/{job}/frames", png(shade=80), headers).close()
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            plan = b'{"sound":[{"id":"../../etc/passwd","from":0,"to":1}]}'
+            self.post(f"/api/render/{job}/finish", plan, json_type)
+        self.assertEqual(error.exception.code, 400)
+        plan = {
+            "sound": [
+                {"id": "overworld", "from": 0, "to": 1.5},
+                {"id": "fork", "from": 1.5, "to": 3},
+            ]
+        }
+        with self.post(f"/api/render/{job}/finish", json.dumps(plan).encode(), json_type) as reply:
+            result = json.loads(reply.read())
+        target = self.room.renders[job]["target"]
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type:format=duration"]
+            + ["-of", "json", str(target)],
+            capture_output=True,
+            check=True,
+        )
+        described = json.loads(probe.stdout)
+        kinds = sorted(stream["codec_type"] for stream in described["streams"])
+        self.assertEqual(kinds, ["audio", "video"])
+        self.assertAlmostEqual(float(described["format"]["duration"]), 3.0, delta=0.15)
+        self.assertGreater(result["bytes"], 0)
+        self.post(f"/api/render/{job}/cancel", b"{}", json_type).close()
+
+    def test_arbitrary_files_cannot_be_served(self):
+        for path in (
+            "/../pyproject.toml",
+            "/assets/../../pyproject.toml",
+            "/%2e%2e/pyproject.toml",
+        ):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request(path)
+            self.assertEqual(error.exception.code, 404, path)
+        with self.request("/assets/favicon.svg") as response:
+            self.assertEqual(response.headers["Content-Type"], "image/svg+xml")
+
+    def test_controls_are_scoped_to_the_active_mode(self):
+        for body in (b'{"action":"pause"}', b'{"action":"speed","speed":2}'):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request("/api/control", body, self.origin)
+            self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/control", b'{"action":"rewind","slot":"x"}', self.origin)
+        self.assertEqual(error.exception.code, 400)
+        with self.request("/api/start", b'{"mode":"simulation"}', self.origin):
+            pass
+        body = b'{"action":"rewind","slot":"mnd-slot2"}'
+        with self.request("/api/control", body, self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.assertEqual(self.room.next_command(), {"type": "rewind", "slot": "mnd-slot2"})
+        with self.request("/api/control", b'{"action":"pause"}', self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.assertEqual(self.room.next_command(), {"type": "pause"})
+        with self.request("/api/control", b'{"action":"play"}', self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.assertEqual(self.room.next_command(), {"type": "resume"})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request("/api/frame/bad%20name")
+        self.assertEqual(error.exception.code, 400)
+        with self.request("/api/trace/mnd-run1") as response:
+            self.assertEqual(json.load(response), {"samples": []})
+        self.request("/api/stop", b"{}", self.origin).close()
+        self.room.worker.join(timeout=3)
+
+
+if __name__ == "__main__":
+    unittest.main()

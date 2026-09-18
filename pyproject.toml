@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mario-never-dies"
+version = "0.1.0"
+description = "Branch a running Mario microVM and continue from a surviving timeline"
+requires-python = ">=3.13"
+dependencies = ["microsandbox>=0.7.1,<0.8", "python-dotenv>=1.0"]
+
+[project.scripts]
+mnd = "mnd.launcher:main"
+
+[project.optional-dependencies]
+host = ["microsandbox>=0.7.1,<0.8"]
+guest = ["typesafe-sdk", "Pillow>=11"]
+dev = ["ruff>=0.12"]
+
+[tool.setuptools.packages.find]
+include = ["mnd*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

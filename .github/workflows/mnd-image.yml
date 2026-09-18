@@ -1,0 +1,75 @@
+# Publishes the Mario Never Dies guest image to ghcr.io/superradcompany/mnd.
+#
+# The image is dependencies only, and image/Dockerfile is its only input,
+# so the tag is that file's digest: the launcher computes the same tag and pulls it
+# (mnd/launcher.py, image_reference). Nothing to bump by hand.
+name: mnd image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - image/**
+      - .github/workflows/mnd-image.yml
+    tags: ["mnd-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tags
+        id: tags
+        run: |
+          digest=$(sha256sum image/Dockerfile | cut -c1-12)
+          {
+            echo "list<<EOF"
+            echo "ghcr.io/superradcompany/mnd:deps-$digest"
+            echo "ghcr.io/superradcompany/mnd:latest"
+            if [[ "$GITHUB_REF" == refs/tags/mnd-v* ]]; then
+              echo "ghcr.io/superradcompany/mnd:${GITHUB_REF_NAME#mnd-v}"
+            fi
+            echo "EOF"
+            echo "check=ghcr.io/superradcompany/mnd:deps-$digest"
+          } >> "$GITHUB_OUTPUT"
+
+      # Apple Silicon hosts run arm64 guests, Linux x86 hosts run amd64.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Guest image for Mario Never Dies: dependencies only, no game data
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The emulator's package bundles Nintendo ROMs. The Dockerfile deletes them in the layer
+      # that installs them; this proves no layer of what was just published carries one.
+      - name: No game data in any layer
+        run: |
+          docker pull "${{ steps.tags.outputs.check }}"
+          docker save "${{ steps.tags.outputs.check }}" -o image.tar
+          layer_dir=$(mktemp -d)
+          tar -xf image.tar -C "$layer_dir"
+          found=0
+          while IFS= read -r layer; do
+            if tar -tf "$layer" 2>/dev/null | grep -i '\.nes$'; then found=1; fi
+          done < <(find "$layer_dir" -type f \( -name '*.tar' -o -path '*/blobs/sha256/*' \))
+          test "$found" -eq 0

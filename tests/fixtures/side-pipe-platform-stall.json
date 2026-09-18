@@ -1,0 +1,380 @@
+{
+  "env": "SuperMarioBros-1-1-v0",
+  "seed": 123,
+  "expected_x": 165,
+  "expected_y": 127,
+  "expected_coins": 7,
+  "prefix": [
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "left",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": true
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "left",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "noop",
+      "frames": 64,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "down",
+      "frames": 8,
+      "release_jump": false
+    }
+  ],
+  "source": "Recorded side-pipe-stall prefix through frame512, then ordinary left/noop braking and eight down inputs; reproduces the stationary platform position one pixel from the reported x164. Test setup only."
+}

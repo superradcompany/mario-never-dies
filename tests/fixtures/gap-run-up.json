@@ -1,0 +1,292 @@
+{
+  "env": "SuperMarioBros-1-1-v0",
+  "seed": 123,
+  "prefix": [
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "left",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": true
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": true
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_run_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": true
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    },
+    {
+      "action": "right_jump",
+      "frames": 8,
+      "release_jump": false
+    }
+  ],
+  "expected_x": 1045
+}
