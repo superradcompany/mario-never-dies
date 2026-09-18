@@ -48,7 +48,7 @@ def sdk():
         name for name in ("branch", "branch_many", "pause", "resume") if not hasattr(Sandbox, name)
     ]
     if missing:
-        raise RuntimeError(f"This microsandbox SDK lacks {', '.join(missing)}; use 0.7.1 or newer")
+        raise RuntimeError(f"This microsandbox SDK lacks {', '.join(missing)}; use 0.7.2 or newer")
     return Sandbox, Volume
 
 

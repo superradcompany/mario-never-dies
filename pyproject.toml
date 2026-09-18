@@ -7,13 +7,13 @@ name = "mario-never-dies"
 version = "0.1.0"
 description = "Branch a running Mario microVM and continue from a surviving timeline"
 requires-python = ">=3.13"
-dependencies = ["microsandbox>=0.7.1,<0.8", "python-dotenv>=1.0"]
+dependencies = ["microsandbox>=0.7.2,<0.8", "python-dotenv>=1.0"]
 
 [project.scripts]
 mnd = "mnd.launcher:main"
 
 [project.optional-dependencies]
-host = ["microsandbox>=0.7.1,<0.8"]
+host = ["microsandbox>=0.7.2,<0.8"]
 guest = ["typesafe-sdk", "Pillow>=11"]
 dev = ["ruff>=0.12"]
 

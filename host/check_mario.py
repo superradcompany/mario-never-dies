@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mnd.backend import MicroVMBackend  # noqa: E402
-from mnd.launcher import image_reference  # noqa: E402
+from mnd.launcher import IMAGE  # noqa: E402
 from mnd.protocol import CANDIDATES, atomic_json  # noqa: E402
 from mnd.recovery import experiments  # noqa: E402
 
@@ -20,7 +20,7 @@ from mnd.recovery import experiments  # noqa: E402
 async def main(args):
     root = Path(__file__).resolve().parents[1]
     os.environ["MSB_BACKEND"] = "local"
-    backend = MicroVMBackend(image=image_reference(), memory=args.memory)
+    backend = MicroVMBackend(image=IMAGE, memory=args.memory)
     prefix = "mnd-check-" + uuid.uuid4().hex[:8]
     source, slot = prefix + "-source", prefix + "-slot"
     children = [prefix + f"-child{i}" for i in range(4)]

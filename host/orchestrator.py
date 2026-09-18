@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mnd.backend import MicroVMBackend  # noqa: E402
-from mnd.launcher import image_reference  # noqa: E402
+from mnd.launcher import IMAGE  # noqa: E402
 from mnd.orchestrator import Orchestrator, Settings  # noqa: E402
 from mnd.simulation import SimulatedBackend  # noqa: E402
 
@@ -18,7 +18,7 @@ from mnd.simulation import SimulatedBackend  # noqa: E402
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulate", action="store_true")
-    parser.add_argument("--image", default=image_reference())
+    parser.add_argument("--image", default=IMAGE)
     parser.add_argument("--rom", type=Path, help="Path to your local Super Mario Bros. NES ROM")
     parser.add_argument("--policy", choices=("typesafe", "heuristic"), default="typesafe")
     parser.add_argument("--no-multiverse", action="store_true")

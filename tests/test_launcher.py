@@ -33,7 +33,7 @@ class KeyTests(unittest.TestCase):
 
 
 class ImageTests(unittest.TestCase):
-    """The image is dependencies only: the Dockerfile is its one input."""
+    """The image is the registry's `latest`: pulled once, and again only when the tag has moved."""
 
     def setUp(self):
         import types
@@ -42,61 +42,96 @@ class ImageTests(unittest.TestCase):
         from mnd import launcher
 
         self.launcher = launcher
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
-        (self.root / "image").mkdir()
-        (self.root / "mnd").mkdir()
-        (self.root / "image/Dockerfile").write_text("first")
-        (self.root / "mnd/guest.py").write_text("first")
         self.catalog = {}
-
-        async def load(path, *, tag):
-            self.assertNotIn(tag, self.catalog)
-            self.catalog[tag] = types.SimpleNamespace(
-                reference=tag, manifest_digest=f"digest-{len(self.catalog)}"
-            )
-
-        async def get(tag):
-            return self.catalog[tag]
 
         async def listing():
             return list(self.catalog.values())
 
-        image = types.SimpleNamespace(
-            load=AsyncMock(side_effect=load),
-            get=AsyncMock(side_effect=get),
-            list=AsyncMock(side_effect=listing),
-        )
+        image = types.SimpleNamespace(list=AsyncMock(side_effect=listing))
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
         for context in (
-            patch.object(launcher, "ROOT", self.root),
-            patch.dict(os.environ, {"MSB_HOME": str(self.root / "home")}),
+            patch.dict(os.environ, {"MSB_HOME": directory.name}),
             patch.dict("sys.modules", {"microsandbox": types.SimpleNamespace(Image=image)}),
         ):
             context.start()
             self.addCleanup(context.stop)
 
-    def test_the_published_image_is_pulled_once(self):
+    def have(self, digest):
+        self.catalog[self.launcher.IMAGE] = types_namespace(self.launcher.IMAGE, digest)
+
+    def test_the_first_launch_pulls_it(self):
         launcher = self.launcher
-        reference = launcher.image_reference()
-        self.assertRegex(reference, r"^ghcr\.io/superradcompany/mnd:deps-[0-9a-f]{12}$")
+        self.assertEqual(launcher.IMAGE, "ghcr.io/superradcompany/mnd:latest")
+        with (
+            patch.object(launcher, "pull") as pull,
+            patch.object(launcher, "published") as registry,
+        ):
+            self.assertEqual(launcher.prepare_image(), launcher.IMAGE)
+        pull.assert_called_once_with(launcher.IMAGE, refresh=False)
+        registry.assert_not_called()
 
-        def pulled(name):
-            self.catalog[name] = types_namespace(name)
+    def test_an_image_that_is_still_the_published_one_is_used_as_it_is(self):
+        launcher = self.launcher
+        self.have("sha256:arm64")
+        with (
+            patch.object(launcher, "pull") as pull,
+            patch.object(launcher, "published", return_value={"sha256:index", "sha256:arm64"}),
+        ):
+            self.assertEqual(launcher.prepare_image(), launcher.IMAGE)
+        pull.assert_not_called()
 
-        with patch.object(launcher, "pull", side_effect=pulled) as pull:
-            self.assertEqual(launcher.prepare_image(), reference)
-            self.assertEqual(launcher.prepare_image(), reference)
-            # Editing the demo's code is not a reason to fetch anything.
-            (self.root / "mnd/guest.py").write_text("second")
-            self.assertEqual(launcher.prepare_image(), reference)
-            self.assertEqual(pull.call_count, 1)
-            # A different Dockerfile is a different image.
-            (self.root / "image/Dockerfile").write_text("second")
-            self.assertNotEqual(launcher.prepare_image(), reference)
-            self.assertEqual(pull.call_count, 2)
+    def test_a_tag_that_moved_is_pulled_again(self):
+        launcher = self.launcher
+        self.have("sha256:old")
+        with (
+            patch.object(launcher, "pull") as pull,
+            patch.object(launcher, "published", return_value={"sha256:index", "sha256:new"}),
+        ):
+            self.assertEqual(launcher.prepare_image(), launcher.IMAGE)
+        pull.assert_called_once_with(launcher.IMAGE, refresh=True)
 
-    def test_an_image_that_cannot_be_pulled_stops_the_launch_and_says_why(self):
+    def test_offline_it_uses_what_is_here(self):
+        launcher = self.launcher
+        self.have("sha256:old")
+        with (
+            patch.object(launcher, "pull") as pull,
+            patch.object(launcher, "published", return_value=None),
+        ):
+            self.assertEqual(launcher.prepare_image(), launcher.IMAGE)
+        pull.assert_not_called()
+
+    def test_a_newer_image_that_does_not_arrive_does_not_stop_the_launch(self):
+        launcher = self.launcher
+        self.have("sha256:old")
+        with (
+            patch.object(
+                launcher, "pull", side_effect=RuntimeError("error decoding response body")
+            ),
+            patch.object(launcher, "published", return_value={"sha256:new"}),
+        ):
+            self.assertEqual(launcher.prepare_image(), launcher.IMAGE)
+
+    def test_another_image_can_be_asked_for(self):
+        launcher = self.launcher
+        with patch.object(launcher, "pull") as pull:
+            release = "ghcr.io/superradcompany/mnd:0.1.0"
+            self.assertEqual(launcher.prepare_image(release), release)
+        pull.assert_called_once_with(release, refresh=False)
+
+    def test_a_download_that_keeps_failing_says_nothing_is_lost(self):
+        launcher = self.launcher
+        with (
+            patch.object(
+                launcher, "pull", side_effect=RuntimeError("error decoding response body")
+            ),
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            launcher.prepare_image()
+        self.assertIn("carries on from what already arrived", str(stopped.exception))
+        self.assertNotIn("Dockerfile", str(stopped.exception))
+
+    def test_a_refusal_stops_the_launch_and_says_why(self):
         launcher = self.launcher
         with (
             patch.object(launcher, "pull", side_effect=RuntimeError("Not authorized: url …")),
@@ -105,8 +140,35 @@ class ImageTests(unittest.TestCase):
             launcher.prepare_image()
         message = str(stopped.exception)
         self.assertIn("Not authorized", message)
-        self.assertIn("the package is private", message)
-        self.assertEqual(self.catalog, {})  # and nothing is built here instead
+        self.assertIn("private package", message)
+
+    def test_only_ghcr_is_asked_whether_a_tag_moved(self):
+        launcher = self.launcher
+        with patch.object(launcher.urllib.request, "urlopen") as network:
+            self.assertIsNone(launcher.published("docker.io/library/alpine:3.20"))
+        network.assert_not_called()
+
+    def test_the_registry_answers_with_the_index_and_each_platform(self):
+        import io
+        import json
+
+        launcher = self.launcher
+
+        class Reply(io.BytesIO):
+            headers = {"Docker-Content-Digest": "sha256:index"}
+
+        def urlopen(request, timeout=None):
+            if isinstance(request, str):
+                return Reply(json.dumps({"token": "anonymous"}).encode())
+            self.assertEqual(
+                request.full_url, "https://ghcr.io/v2/superradcompany/mnd/manifests/latest"
+            )
+            manifests = [{"digest": "sha256:amd64"}, {"digest": "sha256:arm64"}]
+            return Reply(json.dumps({"manifests": manifests}).encode())
+
+        with patch.object(launcher.urllib.request, "urlopen", side_effect=urlopen):
+            found = launcher.published(launcher.IMAGE)
+        self.assertEqual(found, {"sha256:index", "sha256:amd64", "sha256:arm64"})
 
 
 class PullProgressTests(unittest.TestCase):
@@ -179,6 +241,43 @@ class PullProgressTests(unittest.TestCase):
         self.assertEqual(text.count("\n"), 1)  # one line, redrawn; the newline comes at the end
         self.assertIn("200 MB in 1m 40s · 2 layers", text)
 
+    def test_a_resumed_pull_starts_from_the_layers_already_here(self):
+        import types
+
+        from mnd.launcher import PullProgress
+
+        screen = self.Screen(terminal=True)
+        now = [0.0]
+        progress = PullProgress(screen, clock=lambda: now[0])
+
+        def send(kind, **fields):
+            blank = dict.fromkeys(
+                (
+                    "total_download_bytes",
+                    "layer_count",
+                    "layer_index",
+                    "downloaded_bytes",
+                    "total_bytes",
+                )
+            )
+            kind = types.SimpleNamespace(value=kind)
+            progress.event(types.SimpleNamespace(event_type=kind, **blank | fields))
+
+        send("resolved", layer_count=3, total_download_bytes=200_000_000)
+        send("layer_materialize_complete", layer_index=2)  # 100 MB that an earlier pull brought in
+        for layer, (have, size) in enumerate([(30_000_000, 60_000_000), (0, 40_000_000)]):
+            now[0] += 1
+            send(
+                "layer_download_progress",
+                layer_index=layer,
+                downloaded_bytes=have,
+                total_bytes=size,
+            )
+        last = screen.text.split("\r")[-1]
+        self.assertIn(" 65%", last)
+        self.assertIn("130 / 200 MB", last)
+        self.assertIn("1/3 layers", last)
+
     def test_a_log_gets_a_line_every_ten_percent(self):
         _, text = self.replay(terminal=False)
         lines = text.splitlines()
@@ -190,10 +289,97 @@ class PullProgressTests(unittest.TestCase):
         self.assertEqual(lines[-1].strip(), "200 MB in 1m 40s · 2 layers")
 
 
-def types_namespace(reference):
+class PullRetryTests(unittest.TestCase):
+    """A connection that drops is tried again; a registry that says no is not."""
+
+    def sessions(self, outcomes):
+        import types
+
+        made = []
+
+        class Session:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            @property
+            def progress(self):
+                async def events():
+                    if isinstance(self.outcome, Exception):
+                        raise self.outcome
+                    return
+                    yield
+
+                return events()
+
+            async def result(self):
+                async def stop():
+                    pass
+
+                return types.SimpleNamespace(stop=stop)
+
+        def create(name, **kwargs):
+            made.append(name)
+            return Session(outcomes[len(made) - 1])
+
+        async def remove(name):
+            pass
+
+        sandbox = types.SimpleNamespace(create_with_progress=create, remove=remove)
+        policy = types.SimpleNamespace(IF_MISSING="if-missing")
+        return made, types.SimpleNamespace(Sandbox=sandbox, PullPolicy=policy)
+
+    def test_a_dropped_connection_is_tried_again_and_the_pull_goes_through(self):
+        from mnd import launcher
+
+        made, sdk = self.sessions([RuntimeError("image error: error decoding response body"), None])
+        with (
+            patch.dict("sys.modules", {"microsandbox": sdk}),
+            patch.object(launcher.time, "sleep") as wait,
+            patch("sys.stdout", new_callable=__import__("io").StringIO) as out,
+        ):
+            launcher.pull("ghcr.io/superradcompany/mnd:latest")
+        self.assertEqual(len(made), 2)
+        wait.assert_called_once()
+        self.assertIn("the connection dropped", out.getvalue())
+
+    def test_a_refusal_is_not_tried_again(self):
+        from mnd import launcher
+
+        made, sdk = self.sessions([RuntimeError("registry error: Not authorized: url …")])
+        with (
+            patch.dict("sys.modules", {"microsandbox": sdk}),
+            patch.object(launcher.time, "sleep") as wait,
+            patch("sys.stdout", new_callable=__import__("io").StringIO),
+            self.assertRaises(RuntimeError),
+        ):
+            launcher.pull("ghcr.io/superradcompany/mnd:latest")
+        self.assertEqual(len(made), 1)
+        wait.assert_not_called()
+
+    def test_it_gives_up_after_its_tries_and_says_nothing_is_lost(self):
+        from mnd import launcher
+
+        made, sdk = self.sessions([RuntimeError("error decoding response body")] * 3)
+        with (
+            patch.dict("sys.modules", {"microsandbox": sdk}),
+            patch.object(launcher.time, "sleep"),
+            patch("sys.stdout", new_callable=__import__("io").StringIO),
+            self.assertRaises(RuntimeError),
+        ):
+            launcher.pull("ghcr.io/superradcompany/mnd:latest", attempts=3)
+        self.assertEqual(len(made), 3)
+
+
+def types_namespace(reference, digest="published"):
     import types
 
-    return types.SimpleNamespace(reference=reference, manifest_digest="published")
+    return types.SimpleNamespace(reference=reference, manifest_digest=digest)
 
 
 class RomTests(unittest.TestCase):
@@ -301,7 +487,7 @@ class GuestCodeTests(unittest.TestCase):
 
         sandbox = types.SimpleNamespace(create=create)
         with patch.object(backend, "sdk", return_value=(sandbox, types.SimpleNamespace())):
-            machines = backend.MicroVMBackend(image="ghcr.io/superradcompany/mnd:deps-test")
+            machines = backend.MicroVMBackend(image="ghcr.io/superradcompany/mnd:latest")
 
         async def scenario():
             await machines.create("trunk")

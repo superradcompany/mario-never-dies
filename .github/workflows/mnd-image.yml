@@ -1,13 +1,13 @@
-# Publishes the Mario Never Dies guest image to ghcr.io/superradcompany/mnd.
+# Publishes the Mario Never Dies guest image, ghcr.io/superradcompany/mnd.
 #
-# The image is dependencies only, and image/Dockerfile is its only input,
-# so the tag is that file's digest: the launcher computes the same tag and pulls it
-# (mnd/launcher.py, image_reference). Nothing to bump by hand.
+# The image is dependencies only, built from image/Dockerfile. main publishes `latest`, which is
+# what the launcher pulls (mnd/launcher.py); a tag mnd-v1.2.3 also publishes `1.2.3`. Any other
+# branch that touches the image builds and checks it, and publishes nothing.
 name: mnd image
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     paths:
       - image/**
       - .github/workflows/mnd-image.yml
@@ -27,16 +27,20 @@ jobs:
       - name: Tags
         id: tags
         run: |
-          digest=$(sha256sum image/Dockerfile | cut -c1-12)
           {
-            echo "list<<EOF"
-            echo "ghcr.io/superradcompany/mnd:deps-$digest"
-            echo "ghcr.io/superradcompany/mnd:latest"
-            if [[ "$GITHUB_REF" == refs/tags/mnd-v* ]]; then
-              echo "ghcr.io/superradcompany/mnd:${GITHUB_REF_NAME#mnd-v}"
+            if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+              echo "publish=true"
+              echo "list=ghcr.io/superradcompany/mnd:latest"
+              echo "check=ghcr.io/superradcompany/mnd:latest"
+            elif [[ "$GITHUB_REF" == refs/tags/mnd-v* ]]; then
+              echo "publish=true"
+              echo "list=ghcr.io/superradcompany/mnd:${GITHUB_REF_NAME#mnd-v}"
+              echo "check=ghcr.io/superradcompany/mnd:${GITHUB_REF_NAME#mnd-v}"
+            else
+              echo "publish=false"
+              echo "list=mnd:check"
+              echo "check=mnd:check"
             fi
-            echo "EOF"
-            echo "check=ghcr.io/superradcompany/mnd:deps-$digest"
           } >> "$GITHUB_OUTPUT"
 
       # Apple Silicon hosts run arm64 guests, Linux x86 hosts run amd64.
@@ -48,11 +52,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Published builds are for both kinds of host. A branch only needs one to be checked, and
+      # a single platform is what can be loaded into the runner to look inside.
       - uses: docker/build-push-action@v6
         with:
           context: image
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: ${{ steps.tags.outputs.publish == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ steps.tags.outputs.publish == 'true' }}
+          load: ${{ steps.tags.outputs.publish != 'true' }}
           tags: ${{ steps.tags.outputs.list }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -60,11 +67,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The emulator's package bundles Nintendo ROMs. The Dockerfile deletes them in the layer
-      # that installs them; this proves no layer of what was just published carries one.
+      # The emulator's package bundles Nintendo ROMs. The Dockerfile drops them before the
+      # published stage; this proves no layer of the image carries one.
       - name: No game data in any layer
         run: |
-          docker pull "${{ steps.tags.outputs.check }}"
+          if [[ "${{ steps.tags.outputs.publish }}" == "true" ]]; then
+            docker pull "${{ steps.tags.outputs.check }}"
+          fi
           docker save "${{ steps.tags.outputs.check }}" -o image.tar
           layer_dir=$(mktemp -d)
           tar -xf image.tar -C "$layer_dir"

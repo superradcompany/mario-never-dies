@@ -770,9 +770,9 @@ def main():
     parser.add_argument("--rom", type=Path, help="Your local Super Mario Bros. NES ROM")
     args = parser.parse_args()
     if not args.image:
-        from .launcher import image_reference  # the launcher imports this module
+        from .launcher import IMAGE  # the launcher imports this module
 
-        args.image = image_reference()
+        args.image = IMAGE
     os.environ["MSB_BACKEND"] = "local"
     room = ControlRoom(args.runs.resolve(), args.image, args.enable_live, args.rom)
     server = Server(("127.0.0.1", args.port), handler(room))
