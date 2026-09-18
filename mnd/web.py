@@ -366,6 +366,19 @@ class ControlRoom:
             raise ValueError("Unknown game")
         if GAMES[game].get("soon") and mode != "replay" and not preview:
             raise ValueError("That game is coming soon")
+        # Only a live run in progress refuses the next one. A recording being watched gives way:
+        # it never ends by itself (at its end it parks, so the page can still scrub it). A run
+        # that was told to stop, or has ended, is on its way out for a moment while it kills its
+        # machines and writes its files, so the next run waits for it. Outside the lock: a run
+        # publishes its last state under it.
+        leaving = self.worker
+        if leaving and leaving.is_alive():
+            watching = self.view.get("mode") == "replay"
+            ended = self.view.get("status") not in {"starting", "running", "paused"}
+            if watching:
+                self.stop_event.set()
+            if watching or ended or self.stop_event.is_set():
+                leaving.join(timeout=30)
         with self.lock:
             if self.worker and self.worker.is_alive():
                 raise ValueError("A run is already active")
