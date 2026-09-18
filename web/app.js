@@ -37,6 +37,7 @@ let watched = false;       // whether this page saw the current run while it was
 let markers = true;        // the markers knob
 let skipDeaths = false;    // replay only: play just the verse that survived. never on by itself
 let dockTab = 'moment';
+let theater = false;       // only the game on screen. a key; never remembered
 let forkFocus = null;      // the fork (event.t) the futures tab is looking at
 
 function freshRun(output) {
@@ -578,6 +579,7 @@ const soonGlitch = Object.fromEntries(Object.keys(GAMES).filter(id => GAMES[id].
 let lobbyShown = null, lobbyWanted = true;
 function syncLobby(wanted = lobbyWanted) {
   const lobby = lobbyWanted = Boolean(wanted);
+  if (lobby && theater) setTheater(false);
   $('back').hidden = lobby;
   if (lobby) $('leave').hidden = true;
   $('select').hidden = !(lobby && !chosen);
@@ -753,10 +755,14 @@ document.addEventListener('keydown', event => {
   if (['SELECT', 'INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
   if (event.key === 'Escape' && !$('library').hidden) { closeLibrary(); return; }
   if (event.key === 'Escape' && !$('clearcard').hidden) { hideClearCard(); renderPlayback(true); return; }
-  if (event.key === 'Escape') { if (run?.scan) endScan(view?.mode === 'replay' ? 'stop' : 'live'); else clearPeek(); return; }
+  if (event.key === 'Escape') { if (run?.scan) endScan(view?.mode === 'replay' ? 'stop' : 'live'); else { clearPeek(); if (theater) setTheater(false); } return; }
   if (event.key === 'Enter' && view?.intermission && !exporting && !event.target.closest('button, .menu')) { event.preventDefault(); control({action: 'next'}); return; }
   if (event.key === 'm' && !event.metaKey && !event.ctrlKey && !event.altKey && window.MarioSound) { MarioSound.toggle(); showSoundChoice(); syncSound(); return; }
   if (event.key === 'r' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); if (recording) stopRecording(); else startRecording(); return; }
+  if (event.key === 't' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); setTheater(!theater); return; }
+  if ((event.key === '-' || event.key === '=' || event.key === '+') && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); stepLabels(event.key === '-' ? -1 : 1); return; }
+  if (event.key === 'i' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); setStrip(!stripOn); return; }
+  if (event.key === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); setTalk(talkPref === 'side' ? 'sub' : 'side'); return; }
   if (event.key === 'f' && !event.metaKey && !event.ctrlKey && !event.altKey && !$('tp-fullscreen').hidden) { event.preventDefault(); toggleFullscreen(); return; }
   if (event.key === ' ') {
     event.preventDefault();
@@ -1059,7 +1065,9 @@ function setFocus(html) {
   clearTimeout(run?.focusSetTimer);
   run.focusSetTimer = setTimeout(() => {
     if (run !== owner || run.pumpEpoch !== epoch) return;
+    $('focus-prev').innerHTML = html ? node.innerHTML : '';
     node.innerHTML = html; node.classList.remove('out');
+    freshTalk();
   }, 180);
 }
 
@@ -1225,6 +1233,15 @@ function verseOf(name) {
   if (!run || !view) return null;
   if (run.versesFor !== view.events.length) { run.verses = verseModel(view.events); run.versesFor = view.events.length; }
   return run.verses.get(name) || null;
+}
+// A verse's tag, in parts: the number, the trait, what became of it. The largest label size sets
+// the trait on a line of its own, where it no longer fits beside the number.
+function setTag(node, name, mark) {
+  const verse = verseOf(name), key = `${name}|${mark}|${verse?.no}|${verse?.trait}`;
+  if (node.dataset.key === key) return;
+  node.dataset.key = key;
+  const part = (kind, text) => { const span = document.createElement('span'); span.className = kind; span.textContent = text; return span; };
+  node.replaceChildren(part('tag-no', verse ? `verse ${verse.no}` : 'verse'), ...(verse?.trait ? [part('tag-sep', ' · '), part('tag-trait', verse.trait)] : []), part('tag-mark', mark));
 }
 const verseName = name => { const verse = verseOf(name); return verse ? `verse ${verse.no}` : 'verse'; };
 const verseTitle = name => { const verse = verseOf(name); return verse ? `verse ${verse.no}${verse.trait ? ` · ${verse.trait}` : ''}` : 'verse'; };
@@ -1809,8 +1826,8 @@ function syncScreen() {
     tile.element.classList.toggle('loser', Boolean(run.winner) && run.winner !== name);
     tile.element.classList.toggle('ghost', Boolean(known) && known !== name);
     const limit = item.role === 'timed_out' ? 'time limit' : item.role === 'approach_exhausted' ? 'approach limit' : '';
-    if (show.mode === 'grid') tile.tag.textContent = `${verseTitle(name)}${dead ? ' ✕' : limit ? ` · ${limit}` : run.winner === name ? ' · canon' : ''}`;
-    else tile.tag.textContent = dead ? 'dead' : limit || ((view.paused && view.mode !== 'replay') ? 'paused · machine frozen' : '');
+    if (show.mode === 'grid') setTag(tile.tag, name, dead ? ' ✕' : limit ? ` · ${limit}` : run.winner === name ? ' · canon' : '');
+    else { delete tile.tag.dataset.key; tile.tag.textContent = dead ? 'dead' : limit || ((view.paused && view.mode !== 'replay') ? 'paused · machine frozen' : ''); }
   });
   renderJev(show);
   renderPeek();
@@ -3673,6 +3690,141 @@ function renderFullscreen() {
 $('tp-fullscreen').hidden = !(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 $('tp-fullscreen').onclick = () => toggleFullscreen();
 for (const name of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(name, renderFullscreen);
+
+// ---------------------------------------------------------------- where the commentary sits, and theater
+//
+// On a desktop the commentary has no row of its own: that height belongs to the picture. It sits
+// beside the game, in the band the picture leaves empty (the default), or on the picture like a
+// film's captions; c switches, and the choice is kept in this browser. With no band to speak of
+// it is captions either way. A phone keeps the row: there the width is what runs out.
+//
+// t is theater: only the game, with captions. The controls and the way out show while the
+// pointer moves. It is a way of looking, not a setting, so it is never remembered.
+let talkPref = 'side';
+try { if (localStorage.getItem('mnd.talk') === 'sub') talkPref = 'sub'; } catch { /* a private window */ }
+let talkTimer = 0, peekTimer = 0;
+
+function placeTalk() {
+  const body = document.body;
+  const tall = body.classList.contains('tall');
+  const measure = () => ({main: rect($('main')), stage: rect($('stage')), frame: rect($('frame'))});
+  let mode = innerWidth <= 760 ? 'row' : theater || talkPref === 'sub' ? 'sub' : 'side';
+  const apply = () => { body.classList.toggle('talk-side', mode === 'side'); body.classList.toggle('talk-sub', mode === 'sub'); };
+  apply();
+  let at = measure();
+  if (mode === 'side' && !tall && at.frame.left - at.stage.left < 280) { mode = 'sub'; apply(); at = measure(); }
+  const set = (name, value) => $('main').style.setProperty(name, `${Math.round(value)}px`);   // on main: the captions and the strip both read them
+  set('--stage-top', at.stage.top - at.main.top);
+  set('--stage-h', at.stage.height);
+  set('--frame-left', at.frame.left - at.main.left);
+  set('--frame-w', at.frame.width);
+  set('--sub-bottom', at.main.bottom - at.frame.bottom);
+  set('--frame-top', at.frame.top - at.main.top);
+  sizeLabels(at.frame);
+}
+
+// The words on the picture are a fraction of the picture, the way a video's captions are, so they
+// stay readable when a recording of the page is shrunk into a feed. L is what the mp4 export uses:
+// tags 2.1% and captions 3.3% of the picture. - and + step through S M L XL, kept in this browser,
+// one choice for theater and one for the page. The basis is the picture's area, so a tall game
+// gets the same words as a wide one.
+const LABEL_STEPS = ['S', 'M', 'L', 'XL'];
+const LABEL_TAG = {S: 0.012, M: 0.016, L: 0.021, XL: 0.028}, LABEL_TALK = {S: 0.019, M: 0.025, L: 0.033, XL: 0.044};
+let labels = {page: 'L', theater: 'L'};
+try { const saved = JSON.parse(localStorage.getItem('mnd.labels')); for (const key of ['page', 'theater']) if (LABEL_STEPS.includes(saved?.[key])) labels[key] = saved[key]; } catch { /* a private window */ }
+const labelStep = () => labels[theater ? 'theater' : 'page'];
+function sizeLabels(frame) {
+  const step = labelStep(), basis = Math.sqrt(Math.max(1, frame.width * frame.height) * 16 / 15);
+  const main = $('main').style;
+  main.setProperty('--tag', `${Math.max(11, Math.round(basis * LABEL_TAG[step]))}px`);
+  main.setProperty('--talk', `${Math.max(13, Math.round(basis * LABEL_TALK[step]))}px`);
+  main.setProperty('--label-k', String(LABEL_TAG[step] / LABEL_TAG.L));
+  document.body.classList.toggle('labels-xl', step === 'XL');
+}
+function setLabels(step) {
+  if (!LABEL_STEPS.includes(step)) return;
+  labels = {...labels, [theater ? 'theater' : 'page']: step};
+  try { localStorage.setItem('mnd.labels', JSON.stringify(labels)); } catch { /* it lasts until reload */ }
+  renderView();
+  placeTalk();
+  freshTalk();                                              // show a caption at its new size
+}
+const stepLabels = by => setLabels(LABEL_STEPS[Math.max(0, Math.min(LABEL_STEPS.length - 1, LABEL_STEPS.indexOf(labelStep()) + by))]);
+
+// Theater hides the bar, so a posted clip has no title, world or counts. i puts them back as a
+// strip on the picture's top edge, the size of the tags. Off until asked for; kept in this browser.
+let stripOn = false;
+try { stripOn = localStorage.getItem('mnd.strip') === '1'; } catch { /* a private window */ }
+function renderStrip() {
+  document.body.classList.toggle('has-strip', stripOn);
+  $('theater-strip').setAttribute('aria-pressed', String(stripOn));
+  if (!view || !run) return;
+  const hero = G().hero, counts = run.counts || {};
+  $('strip-title').innerHTML = `${esc(hero)} <em>never</em> dies<em>.</em>`;
+  $('strip-stats').innerHTML = `${esc(G().goal(view.stage || G().stage)).replace(/(\S+)$/, '<em>$1</em>')} · ${plural(counts.deaths || 0, 'death')} · ${plural(counts.verses || 0, 'verse')}`;
+}
+function setStrip(on) {
+  stripOn = on;
+  try { localStorage.setItem('mnd.strip', on ? '1' : '0'); } catch { /* it lasts until reload */ }
+  renderStrip();
+}
+// A caption is there while its line is new, and leaves the picture clean after.
+function freshTalk() {
+  const line = document.querySelector('.focus');
+  line.classList.add('fresh');
+  clearTimeout(talkTimer);
+  talkTimer = setTimeout(() => line.classList.remove('fresh'), 6000);
+}
+function renderView() {
+  const side = talkPref === 'side', talk = $('tp-talk'), label = side ? 'commentary beside the game · c' : 'commentary on the picture · c';
+  talk.setAttribute('aria-label', label);
+  talk.title = label;
+  $('ic-talk-side').toggleAttribute('hidden', !side);
+  $('ic-talk-sub').toggleAttribute('hidden', side);
+  $('tp-theater').setAttribute('aria-pressed', String(theater));
+  if ($('tp-labels')) setMenuValue($('tp-labels'), labelStep());
+}
+function setTalk(next) {
+  talkPref = next;
+  try { localStorage.setItem('mnd.talk', next); } catch { /* it lasts until reload */ }
+  renderView();
+  placeTalk();
+  freshTalk();                                              // show the line where it now lives
+}
+function setTheater(on) {
+  if (on === theater) return;
+  theater = on;
+  document.body.classList.toggle('theater', on);
+  document.body.classList.remove('peeking');
+  renderView();
+  placeTalk();
+  freshTalk();
+  if (on) peekTheater(); else relayout();
+}
+function peekTheater() {
+  document.body.classList.add('peeking');
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => { if (!document.querySelector('.deck .menu.open')) document.body.classList.remove('peeking'); }, 2400);
+}
+document.addEventListener('pointermove', () => { if (theater) peekTheater(); });
+$('tp-sound').insertAdjacentHTML('afterend', menuHtml('tp-labels', LABEL_STEPS.map(step => ({value: step, label: `Aa ${step}`})), labelStep(), 'labels'));
+$('tp-labels').title = 'the size of the words on the picture · - and +';
+$('tp-labels').addEventListener('menu-change', event => setLabels(event.detail.value));
+$('theater-strip').onclick = () => setStrip(!stripOn);
+// The strip repeats the bar's numbers, so it follows them rather than every place that changes them.
+new MutationObserver(() => renderStrip()).observe($('counters'), {subtree: true, childList: true, characterData: true});
+new MutationObserver(() => renderStrip()).observe($('world'), {subtree: true, childList: true, characterData: true});
+$('tp-talk').onclick = () => setTalk(talkPref === 'side' ? 'sub' : 'side');
+$('tp-theater').onclick = () => setTheater(!theater);
+$('theater-exit').onclick = () => setTheater(false);
+// The picture moves whenever the layout does: a window resize, a dragged edge, another game,
+// fullscreen, a run starting. Watching the two boxes covers them all.
+const talkWatch = new ResizeObserver(() => placeTalk());
+talkWatch.observe($('stage'));
+talkWatch.observe($('frame'));
+renderView();
+renderStrip();
+placeTalk();
 
 // ---------------------------------------------------------------- render loop
 

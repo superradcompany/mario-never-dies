@@ -84,6 +84,53 @@ class WebTests(unittest.TestCase):
         self.room.worker.join(timeout=3)
         self.assertEqual(self.room.state()["status"], "stopped")
 
+    def test_a_run_started_right_after_a_stop_waits_for_the_old_one_to_leave(self):
+        import threading
+        import time
+
+        release = threading.Event()
+
+        def lingering():  # a stopped run still tearing its machines down
+            release.wait(2)
+
+        self.room.worker = threading.Thread(target=lingering, daemon=True)
+        self.room.worker.start()
+        self.room.stop_event.set()
+        threading.Timer(0.3, release.set).start()
+        began = time.monotonic()
+        with self.request("/api/start", b'{"mode":"simulation"}', self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.assertGreaterEqual(time.monotonic() - began, 0.25)
+        self.room.stop_event.set()
+
+    def test_a_recording_being_watched_gives_way_to_the_next_run(self):
+        import threading
+
+        # A replay never ends by itself: at its end it parks until it is stopped.
+        self.room.view = {**self.room.view, "status": "complete", "mode": "replay"}
+        self.room.worker = threading.Thread(
+            target=lambda: self.room.stop_event.wait(10), daemon=True
+        )
+        self.room.worker.start()
+        with self.request("/api/start", b'{"mode":"simulation"}', self.origin) as response:
+            self.assertEqual(response.status, 202)
+        self.assertEqual(self.room.state()["mode"], "simulation")
+        self.room.stop_event.set()
+
+    def test_a_run_in_progress_still_refuses_another(self):
+        import threading
+
+        release = threading.Event()
+        self.room.worker = threading.Thread(target=lambda: release.wait(5), daemon=True)
+        self.room.worker.start()
+        self.room.view = {**self.room.view, "status": "running", "mode": "live"}
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request("/api/start", b'{"mode":"simulation"}', self.origin)
+            self.assertEqual(error.exception.code, 400)
+        finally:
+            release.set()
+
     def test_a_game_marked_soon_only_starts_as_a_preview(self):
         with self.assertRaises(urllib.error.HTTPError) as error:
             self.request("/api/start", b'{"mode":"simulation","game":"bird"}', self.origin)

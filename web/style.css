@@ -111,7 +111,12 @@ main { display: grid; grid-template-rows: minmax(0, 1fr) var(--deck) auto var(--
 .screen.grid { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; background: var(--line); }
 .tile { position: relative; overflow: hidden; background: #000; min-width: 0; min-height: 0; }
 .tile img, .tile canvas { display: block; width: 100%; height: 100%; object-fit: fill; image-rendering: pixelated; image-rendering: crisp-edges; }
-.tile .tag { position: absolute; left: 10px; top: 10px; font-size: 12px; padding: 5px 7px; background: rgba(14, 14, 18, .85); color: var(--ink); border-left: 2px solid var(--muted); }
+/* the words on the picture are sized from the picture (sizeLabels in app.js), like a video's */
+.tile .tag { position: absolute; left: calc(var(--tag, 12px) * .85); top: calc(var(--tag, 12px) * .85); font-size: var(--tag, 12px); line-height: 1.15; padding: calc(var(--tag, 12px) * .42) calc(var(--tag, 12px) * .6); background: rgba(14, 14, 18, .85); color: var(--ink); border-left: max(2px, calc(var(--tag, 12px) / 6)) solid var(--muted); white-space: nowrap; }
+body.labels-xl .tile .tag:not(:empty) { display: grid; grid-template-columns: auto auto; justify-content: start; }
+body.labels-xl .tag-sep { display: none; }
+body.labels-xl .tag-mark:not(:empty) { padding-left: .35em; }   /* a grid cell drops the mark's leading space */
+body.labels-xl .tag-trait { grid-row: 2; grid-column: 1 / -1; padding-top: .3em; font-size: .62em; opacity: .8; }
 .tile .tag:empty { display: none; }
 .tile.dead img, .tile.dead canvas { filter: grayscale(.85) brightness(.5); }
 .tile.dead::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 2px var(--red), inset 0 0 80px rgba(217, 122, 133, .4); pointer-events: none; }
@@ -269,6 +274,51 @@ body.recording .scrub-hint, body.recording .toast { display: none; }
 .focus em.ours { background: var(--brand); color: var(--on-brand); }
 .ours { color: var(--brand); }
 .focus s { text-decoration: line-through; color: var(--muted); }
+/* The commentary has no row of its own on a desktop: the row's height goes to the picture. It
+   sits beside the game, in the band the picture leaves empty, or on the picture like a film's
+   captions. app.js measures where the picture is (placeTalk) and hands it over as variables. */
+main { position: relative; }
+/* with the commentary out of the flow, its row goes too, or the timeline would slide into it */
+body.talk-side:not(.tall) main, body.talk-sub:not(.tall) main { grid-template-rows: minmax(0, 1fr) var(--deck) var(--map); }
+.focus-prev { display: none; }
+body.talk-side:not(.tall) .focus, body.talk-sub .focus { position: absolute; z-index: 4; margin: 0; min-height: 0; pointer-events: none; }
+body.talk-side:not(.tall) .focus { left: 28px; top: var(--stage-top, 0); height: var(--stage-h, 50%); width: calc(var(--frame-left, 30vw) - 60px); padding: 0; flex-direction: column; align-items: flex-start; justify-content: center; gap: 16px; text-align: left; font-size: calc(clamp(16px, 1.55vw, 26px) * var(--label-k, 1)); }
+body.talk-side:not(.tall) .focus > span:first-child { max-width: none; }
+body.talk-side:not(.tall) .focus-prev { display: block; order: -1; font-size: .6em; line-height: 1.5; color: var(--dim); }
+body.talk-side:not(.tall) .focus-prev em { background: transparent; color: inherit; padding: 0; }
+body.talk-side:not(.tall) .stamp, body.talk-sub .stamp { font-size: calc(clamp(20px, 2.1vw, 34px) * var(--label-k, 1)); }
+/* on the picture: over the lowest ground row, there while a line is new and gone after */
+body.talk-sub .focus { left: var(--frame-left, 25%); width: var(--frame-w, 50%); bottom: var(--sub-bottom, 0); padding: calc(var(--talk, 19px) * .62) calc(var(--talk, 19px) * .95); background: rgba(14, 14, 18, .74); font-size: var(--talk, 19px); opacity: 0; transition: opacity .4s ease; }
+body.talk-sub .focus.fresh { opacity: 1; transition-duration: .12s; }
+/* the tall layout gives the commentary a grid cell; a positioned grid child is placed inside its
+   cell, so the caption has to leave the cell to land on the picture */
+body.talk-sub.tall .focus { grid-area: auto; min-height: 0; padding: calc(var(--talk, 19px) * .62) calc(var(--talk, 19px) * .95); justify-content: center; text-align: center; }
+body.talk-sub .stamp { background: rgba(14, 14, 18, .92); }
+
+/* theater: a key leaves only the game. the controls and the way out show while the pointer moves */
+body.theater { grid-template-rows: minmax(0, 1fr); }   /* the bar is gone, so the page is one row: the game */
+body.theater .bar, body.theater .map, body.theater .edge { display: none; }
+body.theater main, body.theater.tall main, body.theater.talk-sub main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+body.theater .stage, body.theater.tall .stage { grid-column: 1; grid-row: 1; width: auto; padding: 0; border: 0; container-type: size; place-items: center; }
+body.theater .frame { width: min(100cqw, 100cqh * 16 / 15); height: min(100cqh, 100cqw * 15 / 16); }
+body.theater.tall .frame { width: min(100cqw, 100cqh * 9 / 16); height: auto; aspect-ratio: 9 / 16; max-height: none; }
+body.theater .deck, body.theater.tall .deck { position: fixed; z-index: 30; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(920px, 92vw); box-sizing: border-box; background: rgba(14, 14, 18, .84); border: 1px solid var(--line); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+body.theater.peeking .deck { opacity: 1; pointer-events: auto; }
+body.theater.peeking.talk-sub .focus { bottom: calc(var(--sub-bottom, 0px) + 72px); }   /* the caption steps over the controls while they show */
+body.theater .overlay { inset: 0; }
+.theater-chips { position: fixed; z-index: 30; top: 14px; right: 16px; display: flex; gap: 8px; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+.theater-chips .kb { background: rgba(14, 14, 18, .84); border-color: var(--line); color: var(--ink-2); }
+.theater-chips .kb[aria-pressed=true] { color: var(--accent); border-color: rgba(213, 244, 92, .35); }
+body:not(.theater) .theater-chips { display: none; }
+body.theater.peeking .theater-chips { opacity: 1; pointer-events: auto; }
+/* a posted clip has no bar: the strip puts the title, the world and the counts on the picture */
+.strip { display: none; }
+body.theater.has-strip .strip { display: flex; position: absolute; z-index: 4; left: var(--frame-left, 0); top: var(--frame-top, 0); width: var(--frame-w, 100%); box-sizing: border-box; justify-content: space-between; align-items: baseline; gap: 1em; padding: calc(var(--tag, 12px) * .7) calc(var(--tag, 12px) * .95); background: rgba(14, 14, 18, .8); font: 500 calc(var(--tag, 12px) * 1.05)/1.2 var(--pixel); color: var(--ink); pointer-events: none; white-space: nowrap; }
+.strip em { font-style: normal; color: var(--accent); }
+.strip #strip-stats { color: var(--ink-2); }
+/* under the strip, a tile's tag would sit on it: the top row steps down */
+body.theater.has-strip .screen.grid .tile:nth-child(-n+2) .tag { top: calc(var(--tag, 12px) * 3.4); }
+.menu.labels .menu-btn { min-width: 68px; justify-content: space-between; }
 /* a stage clear stamps itself over the narration line, never over the game */
 .stamp { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; pointer-events: none; background: var(--bg); font: 500 clamp(34px, 4.6vw, 62px)/1 var(--display); letter-spacing: -.03em; color: var(--accent); text-shadow: 0 0 40px var(--accent-glow); animation: stamp 2.2s ease-out forwards; }
 .stamp[hidden] { display: none; }
