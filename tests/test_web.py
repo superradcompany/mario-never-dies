@@ -84,6 +84,173 @@ class WebTests(unittest.TestCase):
         self.room.worker.join(timeout=3)
         self.assertEqual(self.room.state()["status"], "stopped")
 
+    def test_completion_reaches_the_stream_before_the_worker_thread_exits(self):
+        published, cleanup, exiting, exit_worker = (threading.Event() for _ in range(4))
+        execute = self.room.execute
+
+        async def finish(env):
+            self.room.observe({**self.room.view, "status": "stopped"})
+            published.set()
+            cleanup.wait(3)  # recording export and VM removal still in progress
+
+        def worker(*args):
+            execute(*args)
+            exiting.set()
+            exit_worker.wait(3)  # reproduce is_alive() still being true after publication
+
+        def stream_state(response):
+            while line := response.readline():
+                if line.startswith(b"data: "):
+                    return json.loads(line[6:])
+            self.fail("stream closed before publishing completion")
+
+        with mock.patch("mnd.web.Orchestrator") as controller:
+            controller.return_value.run = finish
+            self.room.execute = worker
+            try:
+                self.room.start("simulation")
+                self.assertTrue(published.wait(2))
+                with self.request("/api/stream") as response:
+                    before = stream_state(response)
+                    self.assertTrue(before["busy"])
+                    cleanup.set()
+                    self.assertTrue(exiting.wait(2))
+                    after = stream_state(response)
+                self.assertFalse(after["busy"])
+                self.assertGreater(after["version"], before["version"])
+                self.assertTrue(self.room.worker.is_alive())
+            finally:
+                cleanup.set()
+                exit_worker.set()
+                self.room.worker.join(3)
+
+    def test_startup_failure_publishes_an_idle_worker(self):
+        with mock.patch("mnd.web.SimulatedBackend", side_effect=RuntimeError("boot failed")):
+            self.room.start("simulation")
+            self.room.worker.join(3)
+        state = self.room.state()
+        self.assertEqual(state["status"], "failed")
+        self.assertFalse(state["busy"])
+        self.assertIn("output", state)
+        self.assertGreaterEqual(state["version"], 3)  # start, failure, completion
+
+    def live_fixture(self):
+        # No VM or key: model a worker waiting for the normal stop signal.
+        self.room.output = Path(self.temp.name) / "0123456789ab"
+        self.room.view = {**self.room.view, "mode": "live", "status": "running"}
+        self.room.worker = threading.Thread(
+            target=lambda: self.room.stop_event.wait(5), daemon=True
+        )
+        self.room.worker.start()
+        return str(self.room.output)
+
+    def test_hidden_player_freezes_but_never_ends_the_game(self):
+        output = self.live_fixture()
+        self.room.presence("tab-a", output, True, 1)
+        self.room.presence("tab-b", output, True, 1)
+        self.room.presence("tab-a", output, False, 2)
+        self.assertIsNone(self.room.next_command(), "another visible player still owns the run")
+        self.room.presence("tab-b", output, False, 2)
+        self.assertFalse(self.room.stop_event.is_set())
+        self.assertEqual(self.room.next_command(), {"type": "pause", "reason": "player_hidden"})
+        self.room.presence("tab-b", output, False, 3)
+        self.room.keep_viewer("tab-b")
+        self.assertNotIn("tab-b", self.room.viewers, "hidden SSE streams cannot renew visibility")
+        self.assertIsNone(self.room.next_command(), "queue at most one automatic pause")
+        with self.assertRaises(ValueError):
+            self.room.control({"action": "play", "output": output})
+        self.room.presence("tab-b", output, True, 4)
+        self.assertIsNone(self.room.next_command(), "returning to a tab must not resume play")
+        self.room.control({"action": "play", "output": output})
+        self.assertEqual(self.room.next_command(), {"type": "resume"})
+        self.assertFalse(self.room.stop_event.is_set())
+        self.assertIsNone(self.room.state()["viewer_pause_reason"])
+
+    def test_closing_the_last_player_still_stops_the_run(self):
+        output = self.live_fixture()
+        self.room.presence("tab-a", output, True, 1)
+        self.room.presence("tab-b", output, True, 1)
+        self.room.presence("tab-a", output, False, 2, departing=True)
+        self.assertFalse(self.room.stop_event.is_set())
+        self.room.presence("tab-b", output, False, 2, departing=True)
+        self.assertTrue(self.room.stop_event.is_set())
+        self.assertIn("closed", self.room.stop_reason)
+
+    def test_event_stream_keeps_a_visible_player_alive_without_heartbeat_posts(self):
+        output = self.live_fixture()
+        self.room.presence("tab-a", output, True, 1)
+        # The heartbeat POST would have expired, but the player's stream is healthy.
+        self.room.viewers["tab-a"] = time.monotonic() - 1
+        with self.request("/api/stream?client=tab-a") as response:
+            self.assertTrue(response.readline().startswith(b"data: "))
+            response.readline()
+            self.assertIn(b"keepalive", response.readline())
+        with self.room.changed:
+            self.room.expire_viewers()
+        self.assertFalse(self.room.stop_event.is_set())
+        self.assertIsNone(self.room.next_command())
+        self.assertGreater(self.room.viewers["tab-a"], time.monotonic())
+
+    def test_a_crashed_browser_freezes_without_losing_progress(self):
+        output = self.live_fixture()
+        with mock.patch("mnd.web.VIEWER_TIMEOUT", 0.02):
+            self.room.presence("tab-a", output, True, 1)
+        monitor = threading.Thread(target=self.room.watch_viewers, args=(self.room.output,))
+        before = self.room.version
+        monitor.start()
+        try:
+            self.room.wait_for_change(before, 2)
+            self.assertFalse(self.room.stop_event.is_set())
+            self.assertEqual(
+                self.room.next_command(), {"type": "pause", "reason": "connection_lost"}
+            )
+            self.assertTrue(self.room.busy(), "the worker must remain available for resume")
+            self.assertEqual(str(self.room.output), output)
+        finally:
+            self.room.stop()
+            monitor.join(2)
+        self.assertFalse(monitor.is_alive())
+
+    def test_delayed_visibility_and_stop_messages_do_not_affect_a_new_run(self):
+        output = self.live_fixture()
+        self.room.presence("tab-a", output, True, 3)
+        self.room.presence("tab-a", output, False, 2)
+        self.assertFalse(self.room.stop_event.is_set(), "older presence arrived out of order")
+        self.room.presence("tab-a", "previous-run", False, 4)
+        self.room.stop("previous-run")
+        self.assertFalse(self.room.stop_event.is_set())
+
+    def test_stop_publishes_cleanup_state_before_releasing_the_run(self):
+        release = threading.Event()
+        self.room.worker = threading.Thread(target=lambda: release.wait(3), daemon=True)
+        self.room.worker.start()
+        self.room.view = {**self.room.view, "mode": "live", "status": "running"}
+        before = self.room.version
+        try:
+            with self.request("/api/stop", b"{}", self.origin) as response:
+                state = json.load(response)["state"]
+            self.assertTrue(state["busy"])
+            self.assertTrue(state["stopping"])
+            self.assertGreater(state["version"], before)
+        finally:
+            release.set()
+
+    def test_next_world_needs_the_current_flag_and_cannot_queue_twice(self):
+        output = self.live_fixture()
+        self.room.presence("tab-a", output, True, 1)
+        for stage in (None, "1-1"):
+            with self.assertRaises(ValueError):
+                self.room.control({"action": "next", "stage": stage, "output": output})
+        self.room.view = {**self.room.view, "intermission": {"stage": "1-1", "next": "1-2"}}
+        self.room.control({"action": "next", "stage": "1-1", "output": output})
+        self.room.control({"action": "next", "stage": "1-1", "output": output})
+        self.assertEqual(self.room.next_command(), {"type": "next", "stage": "1-1"})
+        self.assertIsNone(self.room.next_command())
+        self.room.view = {**self.room.view, "intermission": {"stage": "1-2", "next": "1-3"}}
+        with self.assertRaises(ValueError):
+            self.room.control({"action": "next", "stage": "1-1", "output": output})
+        self.assertIsNone(self.room.next_command())
+
     def test_a_run_started_right_after_a_stop_waits_for_the_old_one_to_leave(self):
         import threading
         import time

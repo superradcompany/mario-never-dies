@@ -76,6 +76,7 @@ class Orchestrator:
         # A person can pause the whole run: every running VM is paused and the clocks
         # (run budget, stall watchdog, race deadline) stop counting until it resumes.
         self.paused = False
+        self.pause_reason = None
         self.paused_seconds = 0.0
         self.intermission = None
         self.output.mkdir(parents=True, exist_ok=False)
@@ -91,6 +92,7 @@ class Orchestrator:
         view = {
             "status": "paused" if self.paused else self.status,
             "paused": self.paused,
+            "pause_reason": self.pause_reason,
             "intermission": self.intermission,
             "stage": self.settings.stages[self.stage_index],
             "stages": list(self.settings.stages),
@@ -127,8 +129,10 @@ class Orchestrator:
         self.publish()
 
     def check_deadline(self):
-        if self.stop():
-            raise asyncio.CancelledError("Stopped from browser")
+        if reason := self.stop():
+            raise asyncio.CancelledError(
+                reason if isinstance(reason, str) else "Stopped from browser"
+            )
         if self.settings.run_timeout > 0 and self.elapsed() > self.settings.run_timeout:
             raise TimeoutError("Run exceeded its wall-clock budget")
 
@@ -147,12 +151,15 @@ class Orchestrator:
             for name in machines:
                 await self.backend.pause(name)
             self.paused = True
-            self.event("paused", machines=machines)
+            self.pause_reason = command.get("reason")
+            self.event("paused", machines=machines, reason=self.pause_reason)
             paused_at = time.monotonic()
             try:
                 while self.paused:
-                    if self.stop():
-                        raise asyncio.CancelledError("Stopped from browser")
+                    if reason := self.stop():
+                        raise asyncio.CancelledError(
+                            reason if isinstance(reason, str) else "Stopped from browser"
+                        )
                     later = self.commands()
                     if later and later.get("type") == "resume":
                         break
@@ -169,6 +176,7 @@ class Orchestrator:
                     if self.roles.get(name) in {"trunk", "candidate"}:
                         await self.backend.resume(name)
                 self.paused = False
+                self.pause_reason = None
                 self.event("resumed", machines=machines, seconds=pause_length)
             return {"paused_for": pause_length}
         if kind == "rewind" and state is not None:
@@ -697,10 +705,12 @@ class Orchestrator:
         waiting_since = time.monotonic()
         try:
             while True:
-                if self.stop():
-                    raise asyncio.CancelledError("Stopped from browser")
+                if reason := self.stop():
+                    raise asyncio.CancelledError(
+                        reason if isinstance(reason, str) else "Stopped from browser"
+                    )
                 command = self.commands()
-                if command and command.get("type") == "next":
+                if command and command.get("type") == "next" and command.get("stage") == cleared:
                     break
                 await asyncio.sleep(self.settings.poll_seconds)
         finally:
@@ -765,9 +775,9 @@ class Orchestrator:
                                 self.trunk, state, command.get("slot")
                             )
                 await asyncio.sleep(self.settings.poll_seconds)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
             self.status = "stopped"
-            self.event("stopped")
+            self.event("stopped", reason=str(error) or "Run cancelled")
         except Exception as error:
             failure = str(error)
             self.status = "failed"
