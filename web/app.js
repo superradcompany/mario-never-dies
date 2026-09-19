@@ -199,6 +199,9 @@ async function command(path, body) {
   try {
     const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     const result = await response.json();
+    // Start/stop responses carry the same versioned state as the event stream.
+    // A successful launch is shown immediately; even a conflict reconnects its player.
+    if (result.state) render(result.state);
     if (!response.ok) throw new Error(result.error || 'request failed');
     return true;
   } catch (error) {
@@ -209,7 +212,35 @@ async function command(path, body) {
     busyRequest = false;
   }
 }
-const control = body => command('/api/control', body);
+const control = body => command('/api/control', {...body, output: view?.output, stage: view?.intermission?.stage});
+
+const playerClient = crypto.randomUUID(); // unique per page, including duplicate tabs
+let launchPending = false;
+async function startRun(body) {
+  if (document.hidden || busyRequest || launchPending || view?.stopping) return false;
+  launchPending = true;
+  syncLobby();
+  try { return await command('/api/start', {...body, client: playerClient}); }
+  finally { launchPending = false; syncLobby(); }
+}
+
+// A hidden/disconnected player freezes its VMs and keeps its progress. Closing the
+// player is a separate signal; transient visibility changes must never end a game.
+let presenceOutput = null, presenceVisible = false, presenceSequence = 0;
+function playerPresence(force = false, departing = false) {
+  const output = view?.output;
+  const visible = !departing && !document.hidden && !lobbyWanted && view?.mode === 'live' && view?.busy && !view?.stopping;
+  if (!output || view?.mode !== 'live' || !view?.busy) return;
+  if (!force && presenceOutput === output && presenceVisible === Boolean(visible)) return;
+  presenceOutput = output;
+  presenceVisible = Boolean(visible);
+  // Separate from command(): a pending Play/Stop must not swallow a visibility change.
+  fetch('/api/presence', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({client: playerClient, output, visible: presenceVisible, departing, sequence: ++presenceSequence}), keepalive: true}).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => playerPresence(true));
+window.addEventListener('pagehide', () => playerPresence(true, true));
+setInterval(() => playerPresence(true), 2000);
 
 // ---------------------------------------------------------------- the lobby
 //
@@ -291,7 +322,7 @@ function renderCabinets() {
   }
 }
 function pickGame(id) {
-  if (!GAMES[id]) return;
+  if (!GAMES[id] || view?.busy) return;
   game = id;
   chosen = true;
   featured = null;
@@ -301,6 +332,7 @@ function pickGame(id) {
   loadRuns();
 }
 function backToGames() {
+  if (view?.busy) return;
   chosen = false;
   closeLibrary();
   syncLobby(true);
@@ -365,7 +397,7 @@ function closeLibrary() { if ($('library').hidden) return; closeMenus(); $('libr
 function watch(run) {
   if (!run) return;
   closeLibrary();
-  command('/api/start', {mode: 'replay', run, speed: 1});
+  startRun({mode: 'replay', run, speed: 1});
 }
 
 $('shelf-strip').addEventListener('click', event => {
@@ -589,7 +621,8 @@ const soonGlitch = Object.fromEntries(Object.keys(GAMES).filter(id => GAMES[id].
 // stands in for it.
 let lobbyShown = null, lobbyWanted = true;
 function syncLobby(wanted = lobbyWanted) {
-  const lobby = lobbyWanted = Boolean(wanted);
+  // No navigation or stale "leaving" flag may put a lobby over a working VM.
+  const lobby = lobbyWanted = Boolean(wanted) && !view?.busy;
   if (lobby && theater) setTheater(false);
   $('back').hidden = lobby;
   if (lobby) $('leave').hidden = true;
@@ -603,11 +636,12 @@ function syncLobby(wanted = lobbyWanted) {
   applyGame();
   // Refresh on selection as well as server updates, so each lobby has the right launch state.
   const launchHint = gated(game) ? 'live play is coming soon.' : !view?.live_enabled ? 'live play needs the launcher: uv run mnd. replays need no key and no vms.' : !view?.key_configured ? 'set TYPESAFE_API_KEY to play live.' : '';
-  $('live').disabled = Boolean(launchHint);
-  $('live').textContent = gated(game) ? 'coming soon' : 'play live →';
+  $('live').disabled = Boolean(launchHint) || launchPending || Boolean(view?.busy);
+  $('live').textContent = launchPending ? 'starting…' : gated(game) ? 'coming soon' : 'play live →';
   $('live').title = launchHint;
   if (!$('idle').hidden && !$('hint').textContent) $('hint').textContent = launchHint;
   syncAttract();
+  playerPresence();
 }
 
 // Seeks never wait on each other: one request in flight, the newest target wins.
@@ -625,7 +659,7 @@ async function queueSeek(elapsed) {
 }
 
 
-const playLive = () => command('/api/start', {mode: 'live', game, preview: previewing === game});
+const playLive = () => startRun({mode: 'live', game, preview: previewing === game});
 $('live').onclick = playLive;
 $('inter-download').querySelector('.menu-list').innerHTML = DOWNLOAD_OPTIONS;
 
@@ -659,7 +693,7 @@ $('cc-next').onclick = () => control({action: 'next'});
 $('cc-back').onclick = () => { hideClearCard(); renderPlayback(true); };
 $('clearcard').addEventListener('click', event => { if (event.target === $('clearcard') || event.target.classList.contains('cc-stamp') || event.target.classList.contains('cc-stats')) { hideClearCard(); renderPlayback(true); } });
 $('inter-next').onclick = () => control({action: 'next'});
-$('stop').onclick = () => command('/api/stop', {});
+$('stop').onclick = () => command('/api/stop', {output: view?.output});
 $('tp-pause').onclick = () => pressPlayPause();
 $('tp-canon').onclick = () => {
   if (view?.mode !== 'replay' || !run?.canon) return;
@@ -723,9 +757,17 @@ $('tp-markers').onclick = () => { markers = !markers; $('tp-markers').classList.
 // Back to the lobby. A live run is the only thing that is lost by leaving, so only it asks.
 let leaving = false;
 async function leave() {
+  if (busyRequest || leaving) return;
   $('leave').hidden = true;
-  leaving = true;
-  await command('/api/stop', {});
+  const wasWatched = watched;
+  leaving = view?.output || true;
+  watched = false;
+  if (!await command('/api/stop', {output: view?.output})) {
+    leaving = false;
+    watched = wasWatched;
+    if (view) render(view);
+    return;
+  }
   $('finale').hidden = true;
   watched = false;
   syncLobby(true);
@@ -769,8 +811,28 @@ let hintDone = false;
 try { hintDone = localStorage.getItem('mnd.scrubbed') === '1'; } catch {}
 function hintUsed() {
   hintDone = true;
-  $('scrub-hint').hidden = true;
   try { localStorage.setItem('mnd.scrubbed', '1'); } catch {}
+}
+
+// The panel beside the timeline starts put away; opening it is remembered.
+function setDock(open) {
+  $('map-section').classList.toggle('dockless', !open);
+  const label = open ? 'hide the panel' : 'show the panel';
+  $('dock-toggle').setAttribute('aria-expanded', String(open));
+  $('dock-toggle').setAttribute('aria-label', label);
+  $('dock-toggle').title = label;
+  try { localStorage.setItem('mnd.dock', open ? '1' : '0'); } catch {}
+  if (view) renderMap();
+}
+$('dock-toggle').onclick = () => setDock($('map-section').classList.contains('dockless'));
+// Put away unless it was opened before.
+let dockOpen = false;
+try { dockOpen = localStorage.getItem('mnd.dock') === '1'; } catch {}
+if (!dockOpen) {
+  $('map-section').classList.add('dockless');
+  $('dock-toggle').setAttribute('aria-expanded', 'false');
+  $('dock-toggle').setAttribute('aria-label', 'show the panel');
+  $('dock-toggle').title = 'show the panel';
 }
 document.addEventListener('keydown', event => {
   if (['SELECT', 'INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
@@ -1888,15 +1950,15 @@ function renderPlayback(running) {
   if (held && run) {
     $('inter-text').innerHTML = `${esc(G().goal(held.stage))} clear · <em>${plural(run.counts.deaths, 'death')}</em>`;
     $('inter-next').title = `${G().goal(held.next)} · enter`;
-    $('inter-next').disabled = Boolean(exporting);           // a download reads the run while it is at rest
+    $('inter-next').disabled = Boolean(exporting || view.stopping || view.next_pending);
     if (!run.heldAt) { run.heldAt = held.stage; setFocus('stopped at the flag. <em class="ours">the whole machine is frozen</em> until you say go.'); scheduleClearCard(held); }
-    $('cc-next').disabled = Boolean(exporting);
+    $('cc-next').disabled = Boolean(exporting || view.stopping || view.next_pending);
   } else if (run) { run.heldAt = null; hideClearCard(); }
   // The bar in the transport row is what is left once the overlay has been put away.
   $('intermission').hidden = !held || !$('clearcard').hidden || Boolean(clearCardTimer);
   $('transport').hidden = !running || (Boolean(held) && $('intermission').hidden === false);
   $('tp-markers').hidden = !running;
-  $('scrub-hint').hidden = !(running && !hintDone);
+  $('scrub-hint').hidden = !running;                         // shown only while the pointer is over the timeline
   $('frame').classList.toggle('hot', Boolean(running));
   syncSound(running);
   if (!running) $('tp-clock').textContent = '';
@@ -3854,12 +3916,15 @@ placeTalk();
 
 let uiVersion = null;
 function render(next) {
+  // A slow command response/poll must not replace a newer event-stream update.
+  if (view?.ui === next.ui && next.version < view.version) return;
   const previous = view;
   const joining = !run;
   view = next;
   // The server was restarted with a newer page: reload rather than run stale code.
   if (view.ui) { if (uiVersion === null) uiVersion = view.ui; else if (uiVersion !== view.ui) { location.reload(); return; } }
   const running = view.busy || ['starting', 'running', 'paused'].includes(view.status);
+  if (leaving && view.output !== previous?.output) leaving = false;
   if (!run || (view.output && run.output !== view.output)) {
     run = freshRun(view.output);
     run.serial = view.serial || 0;
@@ -3900,10 +3965,13 @@ function render(next) {
     featured = null;
   }
   if (running) chosen = true;
-  // A run that was left is gone from the page at once, even while its machines are still being cleaned up.
+  // Keep the player on screen through export/cleanup. The completion event, not
+  // the Stop HTTP response, is permission to return to the lobby.
   if (leaving && !view.busy) leaving = false;
-  syncLobby(leaving || !(running || (watched && ENDED.has(view.status) && !cutShort && Boolean(closing))));
+  syncLobby(!(running || (watched && ENDED.has(view.status) && !cutShort && Boolean(closing))));
   $('stop').hidden = !running;
+  $('stop').disabled = Boolean(view.stopping);
+  $('back').disabled = Boolean(view.stopping);
 
   // The world, centred in the bar. Live or replay is told by the playback row, not here.
   const pipes = Math.max(0, ...view.timelines.filter(item => ['trunk', 'candidate', 'cleared'].includes(item.role)).map(item => Number(item.score) || 0));
@@ -3929,6 +3997,8 @@ function render(next) {
   renderPlayback(running);
   renderMap();
   syncScreen();
+  if (view.stopping) setFocus('stopping · saving the recording and closing every machine…');
+  else if (view.paused && view.viewer_pause_reason) setFocus('paused while the live player was away. press play to continue this run.');
   const failure = view.error;
   if (failure && previous?.error !== failure) { $('error').textContent = failure; $('error').hidden = false; }
 }
@@ -3950,7 +4020,7 @@ async function poll() {
 
 function connect() {
   if (!('EventSource' in window)) { poll(); return; }
-  const source = new EventSource('/api/stream');
+  const source = new EventSource(`/api/stream?client=${encodeURIComponent(playerClient)}`);
   source.onmessage = event => {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = false; }
     try { render(JSON.parse(event.data)); } catch (error) { console.error(error); }

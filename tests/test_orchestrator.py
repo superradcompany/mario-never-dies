@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -162,6 +163,39 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(resumed["seconds"], 0)
         self.assertIn("clear", kinds)
 
+    async def test_visibility_pause_preserves_every_vm_until_explicit_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend = SimulatedBackend()
+            controller = Orchestrator(
+                backend, Path(directory) / "run", settings=Settings(poll_seconds=0.001)
+            )
+            await controller.start_stage({})
+            child = controller.name("race")
+            await backend.create(child)
+            controller.roles[child] = "candidate"
+            machines = set(backend.owned)
+            clicks = [{"type": "pause", "reason": "connection_lost"}]
+            controller.commands = lambda: clicks.pop(0) if clicks else None
+            held = asyncio.create_task(controller.service_commands())
+            try:
+                await asyncio.sleep(0.02)
+                self.assertFalse(held.done())
+                self.assertTrue(controller.paused)
+                self.assertEqual(controller.pause_reason, "connection_lost")
+                self.assertEqual(backend.owned, machines)
+                self.assertTrue(all(backend.vms[name]["paused"] for name in machines))
+                self.assertFalse(any(e["type"] == "stopped" for e in controller.events))
+                clicks.append({"type": "resume"})
+                await asyncio.wait_for(held, 1)
+                self.assertFalse(controller.paused)
+                self.assertEqual(backend.owned, machines)
+                self.assertTrue(all(not backend.vms[name]["paused"] for name in machines))
+            finally:
+                if not held.done():
+                    held.cancel()
+                await asyncio.gather(held, return_exceptions=True)
+                await backend.cleanup()
+
     async def test_manual_rewind_branches_the_chosen_checkpoint(self):
         commands = []
 
@@ -192,7 +226,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             def commands():
                 # The browser says nothing for a while, then "next".
                 polls["count"] += 1
-                return {"type": "next"} if polls["count"] % 40 == 0 else None
+                return {"type": "next", "stage": "1-1"} if polls["count"] % 40 == 0 else None
 
             views = []
             controller = Orchestrator(
@@ -213,6 +247,28 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             waiting = [view["intermission"] for view in views if view["intermission"]]
             self.assertEqual(waiting[0], {"stage": "1-1", "next": "1-2"})
             self.assertIsNone(views[-1]["intermission"])
+
+    async def test_stale_next_world_click_does_not_release_the_following_flag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Orchestrator(
+                SimulatedBackend(),
+                Path(directory) / "run",
+                settings=Settings(poll_seconds=0.001),
+            )
+            await controller.start_stage({})
+            clicks = [{"type": "next", "stage": "1-1"}]
+            controller.commands = lambda: clicks.pop(0) if clicks else None
+            held = asyncio.create_task(controller.hold_at_flag("1-2", "1-3"))
+            try:
+                await asyncio.sleep(0.02)
+                self.assertFalse(held.done(), "an earlier world's click released the next one")
+                clicks.append({"type": "next", "stage": "1-2"})
+                await asyncio.wait_for(held, 1)
+            finally:
+                if not held.done():
+                    held.cancel()
+                await asyncio.gather(held, return_exceptions=True)
+                await controller.backend.cleanup()
 
     async def test_stopping_at_a_flag_ends_the_run_cleanly(self):
         with tempfile.TemporaryDirectory() as directory:

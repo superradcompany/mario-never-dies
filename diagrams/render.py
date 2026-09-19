@@ -389,7 +389,53 @@ def powered(theme):
     (HERE / f"powered-{theme}.svg").write_text(svg + "\n", encoding="utf-8")
 
 
+def favicon():
+    """The page's tab icon: a pixel yin-yang. Lime is the timeline that lives, red the ones
+    that die, and each carries a dot of the other: every death forks a life."""
+    lime, red, ink, size = "#d5f45c", "#d97a85", "#0e0e12", 16
+    centre = size / 2
+
+    def colour(col, row):
+        x, y = col + 0.5, row + 0.5
+        from_centre = ((x - centre) ** 2 + (y - centre) ** 2) ** 0.5
+        if from_centre > 8:
+            return None
+        if from_centre > 7:
+            return ink
+        if col in (7, 8) and row in (4, 5):
+            return red  # death inside life
+        if col in (7, 8) and row in (10, 11):
+            return lime  # life inside death
+        # A touch over half the radius, so no one-pixel sliver of the other colour is left
+        # between a head and the rim.
+        if ((x - centre) ** 2 + (y - 4.5) ** 2) ** 0.5 <= 4:
+            return lime
+        if ((x - centre) ** 2 + (y - 11.5) ** 2) ** 0.5 <= 4:
+            return red
+        return red if x < centre else lime
+
+    runs = []
+    for row in range(size):
+        col = 0
+        while col < size:
+            fill = colour(col, row)
+            end = col
+            while end < size and colour(end, row) == fill:
+                end += 1
+            if fill:
+                runs.append(
+                    f'<rect x="{col}" y="{row}" width="{end - col}" height="1" fill="{fill}"/>'
+                )
+            col = end
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" '
+        f'shape-rendering="crispEdges">{"".join(runs)}</svg>'
+    )
+    (HERE.parent / "web" / "assets" / "favicon.svg").write_text(svg + "\n", encoding="utf-8")
+
+
 if __name__ == "__main__":
+    favicon()
     hero()
     for theme in PALETTE:
         powered(theme)

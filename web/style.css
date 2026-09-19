@@ -345,7 +345,10 @@ body.resizing.by-col, body.resizing.by-col * { cursor: var(--cur-scrub) !importa
 .map-svg.point { cursor: var(--cur-pointer); }
 .map-svg.grab { cursor: var(--cur-grab); }
 .map-svg.grabbing { cursor: var(--cur-grabbing); }
-.scrub-hint { position: absolute; left: 40px; bottom: 30px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.scrub-hint { position: absolute; left: 40px; bottom: 30px; font-size: 11px; color: var(--muted); pointer-events: none; opacity: 0; transition: opacity .15s ease; }
+.map-wrap:hover .scrub-hint { opacity: 1; }
+.map-chip { opacity: 0; transition: opacity .15s ease; }
+.map-wrap:hover .map-chip, .map-chip:focus-visible { opacity: 1; }
 .scrub-hint[hidden] { display: none; }
 .lane { fill: none; stroke-linecap: round; }
 .lane.trunk { stroke: var(--accent); stroke-width: 3; }
@@ -414,6 +417,14 @@ body.resizing.by-col, body.resizing.by-col * { cursor: var(--cur-scrub) !importa
 
 /* the dock: what was in the floating inspector, docked beside the timeline */
 .dock { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; border-left: 1px solid var(--line); background: var(--bg); position: relative; }
+/* The panel folds away to the right; its handle stays in the same corner either way. */
+.dock-toggle { position: absolute; right: 6px; top: 4px; z-index: 7; width: 26px; height: 26px; }
+.map.dockless { grid-template-columns: minmax(0, 1fr) 0; }
+.map.dockless .dock { display: none; }
+.map.dockless .dock-toggle { background: var(--bg); border-color: var(--line); }
+.map.dockless .dock-toggle svg { transform: scaleX(-1); }
+.map.dockless .map-clock { right: 40px; }
+.dock-tabs { padding-right: 36px; }
 .dock-tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line-2); }
 .dock-tabs button { border: 0; padding: 10px 10px 9px; font-size: 12px; color: var(--muted); }
 .dock-tabs button:hover { background: transparent; color: var(--ink); }

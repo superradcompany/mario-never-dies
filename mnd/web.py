@@ -15,6 +15,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +32,7 @@ from .simulation import SimulatedBackend
 ASSETS = Path(__file__).resolve().parents[1] / "web"
 SOUND_FADE = 0.9  # seconds two loops overlap in a downloaded video, as on the page
 SOUND_LEVEL = 0.6  # the music is the video's only sound, so it sits well above the page's level
+VIEWER_TIMEOUT = 8.0  # loss of contact freezes play; it must never destroy a live run
 
 
 def ui_version() -> str:
@@ -60,6 +62,12 @@ class ControlRoom:
         self.version = 0
         self.stop_event = threading.Event()
         self.worker = None
+        self.worker_done = threading.Event()
+        self.viewers: dict[str, float] = {}
+        self.viewer_sequences: dict[str, int] = {}
+        self.viewer_pause_reason = None
+        self.stop_reason = "Stopped from browser"
+        self.next_stage = None
         self.output = None
         self.replay = None
         self.commands = queue.Queue()
@@ -90,10 +98,84 @@ class ControlRoom:
                 **self.view,
                 "live_enabled": self.live_enabled,
                 "key_configured": bool(os.environ.get("TYPESAFE_API_KEY")),
-                "busy": bool(self.worker and self.worker.is_alive()),
+                "busy": self.busy(),
+                "stopping": self.busy() and self.stop_event.is_set(),
+                "viewer_pause_reason": self.viewer_pause_reason,
+                "next_pending": bool(self.view.get("intermission"))
+                and self.next_stage == self.view["intermission"]["stage"],
                 "version": self.version,
                 "ui": UI_VERSION,
             }
+
+    def busy(self):
+        # A worker publishes its final view before its thread exits. Track completion
+        # explicitly so that the last stream update can already say busy=False.
+        return bool(self.worker and self.worker.is_alive() and not self.worker_done.is_set())
+
+    def stop(self, output=None):
+        with self.changed:
+            # An old tab's delayed Stop must never stop a newer run.
+            if output is not None and output != str(self.output):
+                return
+            self.stop_event.set()
+            self.stop_reason = "Stop requested from the player"
+            self.version += 1
+            self.changed.notify_all()
+
+    def presence(self, client, output, visible, sequence, departing=False):
+        if not isinstance(client, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,64}", client):
+            raise ValueError("Reload the page before starting live play")
+        if not isinstance(sequence, int) or sequence < 1:
+            raise ValueError("Invalid player heartbeat")
+        with self.changed:
+            if output != str(self.output) or self.view.get("mode") != "live" or not self.busy():
+                return
+            if sequence <= self.viewer_sequences.get(client, 0):
+                return
+            self.viewer_sequences[client] = sequence
+            if visible and not self.stop_event.is_set():
+                self.viewers[client] = time.monotonic() + VIEWER_TIMEOUT
+            else:
+                self.viewers.pop(client, None)
+            self.expire_viewers("player_hidden" if not visible else "connection_lost")
+            # Only an actual navigation/close is a departure. Browsers also report
+            # hidden during tab switches and window occlusion: those preserve the run.
+            if departing and not self.viewers and not self.stop_event.is_set():
+                self.stop_reason = "The last live player was closed"
+                self.stop_event.set()
+                self.version += 1
+            self.changed.notify_all()
+
+    def keep_viewer(self, client):
+        with self.lock:
+            # The existing SSE connection proves the player is still connected.
+            # Frame downloads can crowd heartbeat POSTs out of the browser's HTTP
+            # connection pool. Never re-register a deliberately hidden player here.
+            if client in self.viewers and self.busy() and not self.stop_event.is_set():
+                self.viewers[client] = time.monotonic() + VIEWER_TIMEOUT
+
+    def expire_viewers(self, reason="connection_lost"):
+        """Called under the room lock; a presence message never starts or resumes a run."""
+        now = time.monotonic()
+        self.viewers = {client: until for client, until in self.viewers.items() if until > now}
+        if not self.viewers and not self.stop_event.is_set() and not self.viewer_pause_reason:
+            self.viewer_pause_reason = reason
+            # Freeze through the normal controller path so all race candidates and
+            # their clocks pause together. Keep checkpoints and wait for an explicit Play.
+            if not self.view.get("paused") and not self.view.get("intermission"):
+                self.commands.put({"type": "pause", "reason": reason})
+            self.version += 1
+            self.changed.notify_all()
+
+    def watch_viewers(self, output):
+        # A lost connection freezes the VMs even when an unload message never arrives.
+        # A delayed heartbeat is not evidence that the user asked to end the game.
+        with self.changed:
+            while self.output == output and self.busy() and not self.stop_event.is_set():
+                self.expire_viewers()
+                if self.stop_event.is_set():
+                    break
+                self.changed.wait(timeout=0.5)
 
     def wait_for_change(self, seen, timeout):
         """Block until a view newer than ``seen`` is published (or the timeout passes)."""
@@ -104,6 +186,7 @@ class ControlRoom:
     def close(self):
         """Stop the run and release every event stream so the process can exit."""
         self.stop_event.set()
+        self.stop_reason = "The launcher is shutting down"
         with self.changed:
             self.closing = True
             self.changed.notify_all()
@@ -126,7 +209,7 @@ class ControlRoom:
 
     def active(self, source) -> bool:
         with self.lock:
-            return bool(self.worker and self.worker.is_alive()) and self.output == source
+            return self.busy() and self.output == source
 
     def at_flag(self, source) -> bool:
         """A live run held between worlds is at rest: every timeline of the worlds it has
@@ -361,7 +444,7 @@ class ControlRoom:
     def runs(self):
         return recorded_runs(self.root)
 
-    def start(self, mode, run=None, speed=1.0, game="mario", preview=False):
+    def start(self, mode, run=None, speed=1.0, game="mario", preview=False, client=None):
         if game not in GAMES:
             raise ValueError("Unknown game")
         if GAMES[game].get("soon") and mode != "replay" and not preview:
@@ -371,16 +454,21 @@ class ControlRoom:
         # that was told to stop, or has ended, is on its way out for a moment while it kills its
         # machines and writes its files, so the next run waits for it. Outside the lock: a run
         # publishes its last state under it.
-        leaving = self.worker
-        if leaving and leaving.is_alive():
-            watching = self.view.get("mode") == "replay"
+        with self.changed:
+            leaving = self.worker
+            watching = self.busy() and self.view.get("mode") == "replay"
             ended = self.view.get("status") not in {"starting", "running", "paused"}
             if watching:
                 self.stop_event.set()
-            if watching or ended or self.stop_event.is_set():
-                leaving.join(timeout=30)
-        with self.lock:
-            if self.worker and self.worker.is_alive():
+                self.version += 1
+                self.changed.notify_all()
+            wait = watching or ended or self.stop_event.is_set()
+        if leaving and leaving.is_alive() and wait:
+            leaving.join(timeout=30)
+        with self.changed:
+            if self.busy():
+                if self.stop_event.is_set():
+                    raise ValueError("The previous run is still saving and stopping its machines")
                 raise ValueError("A run is already active")
             if mode not in {"simulation", "live", "replay"}:
                 raise ValueError("Unknown mode")
@@ -400,7 +488,17 @@ class ControlRoom:
             # The guest image carries no game data, so Mario needs a ROM from the host.
             if mode == "live" and game == "mario" and not (self.rom and self.rom.is_file()):
                 raise ValueError("Restart the server with --rom /path/to/super-mario-bros.nes")
+            if mode == "live" and (
+                not isinstance(client, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,64}", client)
+            ):
+                raise ValueError("Reload the page before starting live play")
             self.stop_event.clear()
+            self.worker_done.clear()
+            self.viewers = {client: time.monotonic() + VIEWER_TIMEOUT} if mode == "live" else {}
+            self.viewer_sequences = {}
+            self.viewer_pause_reason = None
+            self.stop_reason = "Stopped from browser"
+            self.next_stage = None
             self.replay = None
             self.commands = queue.Queue()
             self.output = self.root / (
@@ -413,6 +511,7 @@ class ControlRoom:
                 "status": "starting",
                 "mode": mode,
                 "game": game,
+                "output": str(self.output),
                 "timelines": [],
                 "events": [],
                 "rewinds": 0,
@@ -423,6 +522,12 @@ class ControlRoom:
                 target=self.execute, args=(mode, source, speed, game), daemon=True
             )
             self.worker.start()
+            self.version += 1
+            self.changed.notify_all()
+            if mode == "live":
+                threading.Thread(
+                    target=self.watch_viewers, args=(self.output,), daemon=True
+                ).start()
 
     def next_command(self):
         try:
@@ -432,10 +537,25 @@ class ControlRoom:
 
     def control(self, body):
         """Browser controls: replay transport, or a manual rewind of the live run."""
+        with self.changed:
+            self._control(body)
+
+    def _control(self, body):
+        # Validate and enqueue atomically with start/stop; an old request cannot
+        # slip into a replacement run between its identity check and its write.
         action = body.get("action")
+        if body.get("output") is not None and body["output"] != str(self.output):
+            raise ValueError("That run has ended")
+        if self.stop_event.is_set():
+            raise ValueError("This run is stopping")
+        if self.view.get("mode") == "live" and action in {"play", "next"}:
+            self.expire_viewers()
+            if not self.viewers:
+                raise ValueError("Return to the live player before continuing")
+            self.viewer_pause_reason = None
         if action == "rewind":
             slot = identifier(str(body.get("slot", "")))
-            if not (self.worker and self.worker.is_alive()) or self.replay is not None:
+            if not self.busy() or self.replay is not None:
                 raise ValueError("Rewinding a snapshot needs a live run")
             self.commands.put({"type": "rewind", "slot": slot})
             return
@@ -443,13 +563,18 @@ class ControlRoom:
         if action == "next":
             if replay is not None:
                 replay.next_world()
-            elif self.worker and self.worker.is_alive():
-                self.commands.put({"type": "next"})
             else:
-                raise ValueError("There is no run waiting at a flag")
+                held = self.view.get("intermission")
+                if not self.busy() or not held or body.get("stage") != held["stage"]:
+                    raise ValueError("There is no matching world waiting at a flag")
+                if self.next_stage != held["stage"]:
+                    self.next_stage = held["stage"]
+                    self.commands.put({"type": "next", "stage": held["stage"]})
+                    self.version += 1
+                    self.changed.notify_all()
             return
         if replay is None:
-            if action in {"pause", "play"} and self.worker and self.worker.is_alive():
+            if action in {"pause", "play"} and self.busy():
                 self.commands.put({"type": "pause" if action == "pause" else "resume"})
                 return
             raise ValueError("Transport controls need a running replay or live run")
@@ -545,13 +670,22 @@ class ControlRoom:
                 self.output,
                 settings=settings,
                 observer=self.observe,
-                stop=self.stop_event.is_set,
+                stop=lambda: self.stop_event.is_set() and self.stop_reason,
                 commands=self.next_command,
             )
             asyncio.run(controller.run(env))
         except Exception as error:
             with self.changed:
                 self.view = {**self.view, "status": "failed", "error": str(error)}
+                self.version += 1
+                self.changed.notify_all()
+        finally:
+            # Orchestrator.run has now saved the recording and cleaned up its VMs.
+            # This must be a new stream version, including on startup/replay errors.
+            with self.changed:
+                self.worker_done.set()
+                self.viewers.clear()
+                self.viewer_sequences.clear()
                 self.version += 1
                 self.changed.notify_all()
 
@@ -572,6 +706,7 @@ def handler(room):
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             seen = None
+            client = parse_qs(urlparse(self.path).query).get("client", [None])[0]
             try:
                 while not room.closing:
                     state = room.state()
@@ -582,6 +717,7 @@ def handler(room):
                     else:
                         self.wfile.write(b": keepalive\n\n")
                     self.wfile.flush()
+                    room.keep_viewer(client)
                     room.wait_for_change(seen, timeout=1.0)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
@@ -742,9 +878,19 @@ def handler(room):
                         body.get("speed", 1),
                         body.get("game") or "mario",
                         body.get("preview") is True,
+                        body.get("client"),
                     )
                 elif self.path == "/api/stop":
-                    room.stop_event.set()
+                    room.stop(body.get("output"))
+                elif self.path == "/api/presence":
+                    room.presence(
+                        body.get("client"),
+                        body.get("output"),
+                        body.get("visible") is True,
+                        body.get("sequence"),
+                        body.get("departing") is True,
+                    )
+                    return self.send(202, b'{"ok":true}')
                 elif self.path == "/api/control":
                     room.control(body)
                 else:
@@ -752,8 +898,10 @@ def handler(room):
             except EncoderMissing as error:
                 return self.send(501, json.dumps({"error": str(error)}).encode())
             except (ValueError, TypeError, AttributeError) as error:
-                return self.send(400, json.dumps({"error": str(error)}).encode())
-            self.send(202, b'{"ok":true}')
+                return self.send(
+                    400, json.dumps({"error": str(error), "state": room.state()}).encode()
+                )
+            self.send(202, json.dumps({"ok": True, "state": room.state()}).encode())
 
     return Handler
 
