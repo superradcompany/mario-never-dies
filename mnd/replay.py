@@ -325,6 +325,25 @@ class Replay:
                 g = self.advance(event["sandbox"], event["frame"], g, cursor)
                 self.finish(event["sandbox"], g, event["frame"], "clear")
             elif kind in {"failed", "stopped", "cleanup_failed"}:
+                # Stop exports the current trunk or unfinished race. Play those
+                # final frames too: the last checkpoint/fork is not the end of the
+                # flight. Parallel candidates share this interval, not serial time.
+                ends = []
+                for name in race or [trunk]:
+                    timeline = self.timelines.get(name)
+                    if timeline is None or timeline.ended_at is not None:
+                        continue
+                    last = max(
+                        cursor.get(name, 0),
+                        timeline.frame_numbers[-1] if timeline.frame_numbers else 0,
+                        timeline.rows[-1]["end_frame"] if timeline.rows else 0,
+                    )
+                    end = g + max(0, last - cursor.get(name, 0)) / self.fps
+                    self.finish(
+                        name, end, last, "dead" if timeline.final_phase == "dead" else "halted"
+                    )
+                    ends.append(end)
+                g = max([g, *ends])
                 for timeline in self.timelines.values():
                     if timeline.ended_at is None:
                         self.finish(timeline.name, g, None, "halted")

@@ -527,12 +527,15 @@ class ControlRoom:
                 # Flappy is one life and no end: many more deaths in the same time, and a
                 # fresh sky every run.
                 seed=random.randrange(1, 1_000_000) if game == "bird" else None,
-                run_timeout=4800,
-                max_rewinds=400 if game == "bird" else 80,
+                # Zero disables total-run budgets for endless Flappy. Individual
+                # API/race/stall timeouts still detect a broken worker or service.
+                run_timeout=0 if game == "bird" else 4800,
+                max_rewinds=0 if game == "bird" else 80,
+                max_decisions=0 if game == "bird" else 2000,
                 # A pipe is a narrow target: give a copy one more fork before falling back.
                 races_per_checkpoint=3 if game == "bird" else 2,
-                # Every copy of a stage stays frozen (and switchable) rather than the
-                # oldest being killed to make room: a paused 126 MiB VM costs RAM only.
+                # Bound VM memory even for an endless run; older copies are retired
+                # as new ones arrive, preserving Flappy's recent copies and anchors.
                 max_slots=12,
                 intermission=True,
             )

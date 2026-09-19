@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from mnd import bird, bird_guest
 from mnd.bird import FRAMES_PER_DECISION, GROUND, PIPE_GAP, Game, experiments, heuristic
 from mnd.games import GAMES, game_of
-from mnd.orchestrator import Orchestrator, Settings
+from mnd.orchestrator import Orchestrator, Settings, Slot
 from mnd.recovery import consume_sequence, sequence_chunk
 from mnd.simulation import SimulatedBackend
 
@@ -92,10 +92,14 @@ class EngineTests(unittest.TestCase):
         for plan in plans:
             bird.validate_sequence(plan)
             self.assertEqual(plan["x_min"], 400, "a verse differs from its first frame")
-            self.assertEqual([step["action"] for step in plan["steps"]], ["glide"])
+            self.assertTrue(all(step["action"] in bird.ACTIONS for step in plan["steps"]))
         for race in (plans[0:4], plans[4:8], plans[8:12]):
             self.assertEqual(len({plan["aim"] for plan in race}), 4)
-            self.assertEqual(len({plan["steps"][0]["frames"] for plan in race}), 4)
+            self.assertEqual(race[0]["steps"][0]["action"], "flap")
+            self.assertEqual(race[1]["steps"][0]["action"], "glide")
+            for delayed in race[2:]:
+                self.assertEqual([s["action"] for s in delayed["steps"]], ["glide", "flap"])
+            self.assertNotEqual(race[2]["steps"], race[3]["steps"])
         self.assertNotEqual(
             experiments(400, 640)[0]["experiment_id"], experiments(256, 640)[0]["experiment_id"]
         )
@@ -110,7 +114,7 @@ class EngineTests(unittest.TestCase):
         self.assertLess(high["steer_for_y"], low["steer_for_y"])
         self.assertEqual(high["steer_for_y"], int(game.pipes[0].gap_top + PIPE_GAP * 0.2))
 
-    def test_a_verse_glides_then_hands_back(self):
+    def test_a_verse_executes_its_opening_then_hands_back(self):
         plan = experiments(0, 96)[0]
         game, flown = Game(seed=5), []
         while True:
@@ -211,7 +215,39 @@ class StubPicture:
 
 
 class GuestTests(unittest.TestCase):
-    def test_the_worker_gates_at_every_pipe_and_clears(self):
+    def test_final_pipe_and_collision_on_one_frame_is_a_death(self):
+        game = Game(seed=1, y=380, velocity=10, pipes=[bird.Pipe(x=12, gap_top=100)])
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            unittest.mock.patch.object(bird_guest, "Game", return_value=game),
+            unittest.mock.patch.object(Game, "render", lambda self: StubPicture()),
+            unittest.mock.patch.object(
+                bird_guest.HeuristicPolicy,
+                "choose",
+                return_value=bird_guest.Decision("glide", 1.0, {"glide": 1.0}, 0.0),
+            ),
+            unittest.mock.patch.object(
+                bird_guest.Gate, "wait", return_value={"timeline": "run1", "force": None}
+            ),
+        ):
+            root = Path(directory)
+            bird_guest.run(
+                SimpleNamespace(
+                    root=root,
+                    target=1,
+                    policy="heuristic",
+                    frames_per_decision=6,
+                    max_decisions=10,
+                    seed=1,
+                    checkpoint_frames=12,
+                )
+            )
+            state = json.loads((root / "state.json").read_text())
+            self.assertEqual((state["phase"], state["score"]), ("dead", 1))
+            self.assertEqual(state["flight_frame"], 1)
+            self.assertGreater(state["frame"], state["flight_frame"])
+
+    def test_the_worker_gates_frequently_and_marks_only_cleared_pipes(self):
         """The host side of the protocol, played by a thread: release every gate the worker
         opens, exactly as the controller does, and let the stand-in controller fly."""
         with (
@@ -221,11 +257,11 @@ class GuestTests(unittest.TestCase):
             root = Path(directory)
             args = SimpleNamespace(
                 root=root, target=3, policy="heuristic", frames_per_decision=4,
-                max_decisions=2000, seed=11,
+                max_decisions=2000, seed=11, checkpoint_frames=12,
             )  # fmt: skip
             worker = threading.Thread(target=bird_guest.run, args=(args,), daemon=True)
             worker.start()
-            gates, deadline = [], time.monotonic() + 20
+            gates, states, deadline = [], [], time.monotonic() + 20
             while worker.is_alive() and time.monotonic() < deadline:
                 try:
                     state = json.loads((root / "state.json").read_text())
@@ -234,6 +270,7 @@ class GuestTests(unittest.TestCase):
                     continue
                 if state["phase"] == "gate" and state["gate"] not in gates:
                     gates.append(state["gate"])
+                    states.append(state)
                     command = {
                         "gate": state["gate"],
                         "timeline": "run1",
@@ -248,7 +285,16 @@ class GuestTests(unittest.TestCase):
             self.assertEqual(final["score"], 3)
             self.assertEqual(final["game"], "bird")
             self.assertEqual(final["x_pos"], final["frame"] * bird.SCROLL)
-            self.assertEqual(len(gates), 3, "a copy is offered at the start and after each pipe")
+            self.assertEqual(states[0]["frame"], 0)
+            self.assertGreater(len(gates), 12, "periodic copies also exist before the first pipe")
+            self.assertTrue(
+                all(
+                    0 < b["frame"] - a["frame"] <= args.checkpoint_frames
+                    for a, b in zip(states, states[1:], strict=False)
+                )
+            )
+            self.assertEqual([s["score"] for s in states if s["milestone"]], [1, 2])
+            self.assertTrue(any(s["score"] > 0 and not s["milestone"] for s in states))
             rows = [
                 json.loads(line)
                 for line in (root / "timelines/run1/run.jsonl").read_text().splitlines()
@@ -284,7 +330,9 @@ class SeamTests(unittest.IsolatedAsyncioTestCase):
                 live = self.vms[name]
                 past = live["escaped"] and 236 <= live["x_pos"] < 294
                 if live["phase"] == "playing" and past and not live.get("gated"):
-                    live.update(phase="gate", gate=uuid.uuid4().hex, milestone=True, gated=True)
+                    live.update(
+                        phase="gate", gate=uuid.uuid4().hex, milestone=True, gated=True, score=1
+                    )
                     live["checkpoint_seq"] += 1
                     return copy.deepcopy(live)
                 return state
@@ -311,3 +359,55 @@ class SeamTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckpointSelectionTests(unittest.IsolatedAsyncioTestCase):
+    def test_game_defaults_and_explicit_overrides(self):
+        self.assertEqual((Settings().checkpoint_frames, Settings().rewind_margin), (150, 96))
+        bird_settings = Settings(game="bird")
+        self.assertEqual((bird_settings.checkpoint_frames, bird_settings.rewind_margin), (12, 0))
+        custom = Settings(game="bird", checkpoint_frames=24, rewind_margin=20)
+        self.assertEqual((custom.checkpoint_frames, custom.rewind_margin), (24, 20))
+
+    async def test_latest_flappy_copy_is_tried_before_falling_back(self):
+        # Recorded report: death x632 skipped the newest x540 copy under Mario's 96px rule.
+        for game, failures, expected in (
+            ("bird", 0, [540]),
+            ("bird", 3, [540, 540, 540, 0]),
+            ("mario", 0, [0]),
+        ):
+            with (
+                self.subTest(game=game, failures=failures),
+                tempfile.TemporaryDirectory() as folder,
+            ):
+                backend = SimulatedBackend()
+                controller = Orchestrator(
+                    backend,
+                    Path(folder) / "run",
+                    settings=Settings(game=game, races_per_checkpoint=3),
+                )
+                for name, x in (("old", 0), ("latest", 540), ("dead", 632)):
+                    await backend.create(name)
+                    backend.vms[name].update(x_pos=x, frame=x // 4)
+                    if name != "dead":
+                        controller.slots.append(Slot(name, copy.deepcopy(backend.vms[name])))
+                attempts = []
+
+                async def race(
+                    target,
+                    death_x,
+                    *,
+                    death_frame=None,
+                    death_score=0,
+                    attempts=attempts,
+                    failures=failures,
+                ):
+                    attempts.append(target.state["x_pos"])
+                    return "winner" if len(attempts) > failures else None
+
+                controller.race = race
+                try:
+                    self.assertEqual(await controller.rewind("dead", backend.vms["dead"]), "winner")
+                    self.assertEqual(attempts, expected)
+                finally:
+                    await backend.cleanup()

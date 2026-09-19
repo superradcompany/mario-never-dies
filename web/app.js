@@ -237,9 +237,9 @@ const GAMES = {
     machine: 'one machine: the game, and jev on the one button.',
     died: 'the bird died.', alive: 'the bird is flying again', goal: stage => `${stage} pipes`, flag: stage => `${stage} pipes.`, reached: 'cleared the pipes'},
 };
-// A game marked soon keeps its cabinet on the menu but cannot be opened. ?preview=<game>
-// opens it anyway, for whoever is still building it.
-const previewing = new URLSearchParams(location.search).get('preview');
+// Three quick clicks unlock Flappy's lobby and live preview for this page,
+// just like ?preview=<game>. Reloading restores the coming-soon cabinet.
+let previewing = new URLSearchParams(location.search).get('preview');
 const gated = id => Boolean(GAMES[id]?.soon) && previewing !== id;
 let game = 'mario';
 let chosen = false;         // a cabinet was picked; until then the lobby is the game menu
@@ -286,13 +286,12 @@ function renderCabinets() {
     const best = runs[0];
     const cabinet = document.querySelector(`.cabinet[data-game="${id}"]`);
     cabinet.classList.toggle('soon', gated(id));
-    cabinet.setAttribute('aria-disabled', String(gated(id)));
-    cabinet.setAttribute('aria-label', gated(id) ? `${GAMES[id].title}: coming soon` : `${GAMES[id].title}: open its lobby`);
+    cabinet.setAttribute('aria-label', `${GAMES[id].title}: ${id === 'bird' ? 'click three times to open its lobby' : 'open its lobby'}`);
     $(`cab-${id}-stats`).textContent = gated(id) ? 'soon' : runs.length ? `${plural(runs.length, 'recording')} · best: ${runOutcome(best)}` : 'no runs yet';
   }
 }
 function pickGame(id) {
-  if (!GAMES[id] || gated(id)) return;
+  if (!GAMES[id]) return;
   game = id;
   chosen = true;
   featured = null;
@@ -306,7 +305,19 @@ function backToGames() {
   closeLibrary();
   syncLobby(true);
 }
-$('cabinets').addEventListener('click', event => { const cabinet = event.target.closest('[data-game]'); if (cabinet) pickGame(cabinet.dataset.game); });
+let cabinetClicks = null;
+document.addEventListener('click', event => {
+  const cabinet = event.target.closest('#cabinets [data-game]');
+  if (!cabinet || $('select').hidden) { cabinetClicks = null; return; }
+  const id = cabinet.dataset.game;
+  // Count across the poster and label, including taps. A pause or a click elsewhere resets it.
+  const count = cabinetClicks?.id === id && event.timeStamp - cabinetClicks.at <= 600 ? cabinetClicks.count + 1 : 1;
+  cabinetClicks = {id, count, at: event.timeStamp};
+  if (id === 'bird' && count < 3) return;
+  if (id === 'bird') previewing = id;
+  cabinetClicks = null;
+  pickGame(id);
+});
 $('to-games').onclick = () => backToGames();
 
 // Everything on the page that depends on which game it is: the words, the shape of the
@@ -590,6 +601,12 @@ function syncLobby(wanted = lobbyWanted) {
     if (lobby) loadRuns(); else closeLibrary();
   }
   applyGame();
+  // Refresh on selection as well as server updates, so each lobby has the right launch state.
+  const launchHint = gated(game) ? 'live play is coming soon.' : !view?.live_enabled ? 'live play needs the launcher: uv run mnd. replays need no key and no vms.' : !view?.key_configured ? 'set TYPESAFE_API_KEY to play live.' : '';
+  $('live').disabled = Boolean(launchHint);
+  $('live').textContent = gated(game) ? 'coming soon' : 'play live →';
+  $('live').title = launchHint;
+  if (!$('idle').hidden && !$('hint').textContent) $('hint').textContent = launchHint;
   syncAttract();
 }
 
@@ -608,7 +625,8 @@ async function queueSeek(elapsed) {
 }
 
 
-$('live').onclick = () => command('/api/start', {mode: 'live', game, preview: previewing === game});
+const playLive = () => command('/api/start', {mode: 'live', game, preview: previewing === game});
+$('live').onclick = playLive;
 $('inter-download').querySelector('.menu-list').innerHTML = DOWNLOAD_OPTIONS;
 
 // The world-clear overlay. It arrives a beat after the flag, so the moment itself is seen
@@ -722,7 +740,10 @@ $('leave-go').onclick = () => leave();
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('leave').hidden) $('leave').hidden = true; });
 document.addEventListener('click', event => { if (!$('leave').hidden && !event.target.closest('.brand')) $('leave').hidden = true; });
 
-$('again').onclick = async () => { await command('/api/stop', {}); $('finale').hidden = true; watched = false; syncLobby(true); };
+// The closing card. What "again" means depends on what just ended: a run that was played is
+// played again, a recording is watched again. The lobby has its own button, and says so.
+$('again').onclick = () => { if (view?.mode === 'replay') watch(view.source); else playLive(); };
+$('finale-lobby').onclick = () => leave();
 $('finale-poster').onclick = () => saveMultiversePoster();
 $('multiverse-save').onclick = () => saveMultiversePoster();
 $('scrub').onclick = () => { $('finale').hidden = true; };
@@ -1639,7 +1660,10 @@ function finale(eyebrow, title, dek) {
   $('finale-map').hidden = !model.total;
   $('finale-poster').hidden = !model.total;
   if (model.total) requestAnimationFrame(() => paintMultiverse($('finale-map'), model, {seed: runSeed()}));
-  $('scrub').hidden = view?.mode !== 'replay';
+  const replayed = view?.mode === 'replay';
+  $('again').textContent = replayed ? 'watch again' : view?.status === 'failed' ? 'try again →' : 'play again →';
+  $('again').hidden = replayed && !view?.source;
+  $('scrub').hidden = !replayed;
   $('finale-download').hidden = !recordingId();
   $('finale').hidden = false;
 }
@@ -3660,13 +3684,14 @@ function renderRecording() {
   const button = $('tp-record');
   button.classList.toggle('on', on);
   $('tp-record-stop').disabled = !on;
+  $('tp-record-stop').hidden = !on;                         // beside the record dot only while it records: it is not the run's stop
   const label = on ? 'recording · r stops it' : 'record the screen · r';
   button.setAttribute('aria-label', label);
   button.title = label;
   $('rec-time').hidden = !on;
   if (on) $('rec-time').textContent = clock((performance.now() - recording.started) / 1000);
 }
-$('tp-record').onclick = () => startRecording();
+$('tp-record').onclick = () => { if (recording) stopRecording(); else startRecording(); };
 $('tp-record-stop').onclick = () => stopRecording();
 
 // ---------------------------------------------------------------- fullscreen
@@ -3706,13 +3731,12 @@ let talkTimer = 0, peekTimer = 0;
 
 function placeTalk() {
   const body = document.body;
-  const tall = body.classList.contains('tall');
   const measure = () => ({main: rect($('main')), stage: rect($('stage')), frame: rect($('frame'))});
   let mode = innerWidth <= 760 ? 'row' : theater || talkPref === 'sub' ? 'sub' : 'side';
   const apply = () => { body.classList.toggle('talk-side', mode === 'side'); body.classList.toggle('talk-sub', mode === 'sub'); };
   apply();
   let at = measure();
-  if (mode === 'side' && !tall && at.frame.left - at.stage.left < 280) { mode = 'sub'; apply(); at = measure(); }
+  if (mode === 'side' && at.frame.left - at.stage.left < 280) { mode = 'sub'; apply(); at = measure(); }
   const set = (name, value) => $('main').style.setProperty(name, `${Math.round(value)}px`);   // on main: the captions and the strip both read them
   set('--stage-top', at.stage.top - at.main.top);
   set('--stage-h', at.stage.height);
@@ -3880,9 +3904,6 @@ function render(next) {
   if (leaving && !view.busy) leaving = false;
   syncLobby(leaving || !(running || (watched && ENDED.has(view.status) && !cutShort && Boolean(closing))));
   $('stop').hidden = !running;
-  $('live').disabled = !view.live_enabled || !view.key_configured;
-  $('live').title = !view.live_enabled ? 'start with uv run mnd to enable live microvm play' : !view.key_configured ? 'TYPESAFE_API_KEY is not configured on the host' : '';
-  if (!$('idle').hidden && !$('hint').textContent) $('hint').textContent = !view.live_enabled ? 'live play needs the launcher: uv run mnd. replays need no key and no vms.' : !view.key_configured ? 'set TYPESAFE_API_KEY to play live.' : '';
 
   // The world, centred in the bar. Live or replay is told by the playback row, not here.
   const pipes = Math.max(0, ...view.timelines.filter(item => ['trunk', 'candidate', 'cleared'].includes(item.role)).map(item => Number(item.score) || 0));
@@ -3945,7 +3966,7 @@ function connect() {
 // click puts an edge back. The phone layout keeps its own sizes.
 const LAYOUT_KEY = 'mnd.layout';
 const EDGES = {map: {name: '--map', handle: 'resize-map', row: true}, dock: {name: '--dock', handle: 'resize-dock', row: false}};
-const layoutMode = () => (document.body.classList.contains('tall') ? 'tall' : 'wide');
+const layoutMode = () => 'wide';                           // every game uses the one page; the key stays for sizes already saved
 function savedLayout() { try { return JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch { return {}; } }
 function saveLayout(key, value) {
   const all = savedLayout(), mode = layoutMode();
@@ -3956,7 +3977,7 @@ function saveLayout(key, value) {
 // The game keeps at least 160 px of height, the timeline at least 320 px of width.
 function clampEdge(key, value) {
   const main = document.querySelector('main');
-  if (key === 'map') return Math.round(Math.max(140, Math.min(value, main.clientHeight - $('deck').offsetHeight - (layoutMode() === 'tall' ? 120 : 160 + document.querySelector('.focus').offsetHeight))));
+  if (key === 'map') return Math.round(Math.max(140, Math.min(value, main.clientHeight - $('deck').offsetHeight - 160)));
   return Math.round(Math.max(240, Math.min(value, $('map-section').clientWidth - 320, 760)));
 }
 function relayout() { if (!view) return; renderMap(); if (dockTab === 'multiverse') renderMultiverse(); }
@@ -4009,15 +4030,6 @@ for (const [key, edge] of Object.entries(EDGES)) {
     relayout();
   });
 }
-// the other layout (a tall game beside the timeline) brings its own saved sizes and limits
-let wasTall = document.body.classList.contains('tall');
-new MutationObserver(() => {
-  const tall = document.body.classList.contains('tall');
-  if (tall === wasTall) return;
-  wasTall = tall;
-  applyLayout();
-  relayout();
-}).observe(document.body, {attributes: true, attributeFilter: ['class']});
 applyLayout();
 
 window.addEventListener('resize', () => { applyLayout(); if (view) renderMap(); });

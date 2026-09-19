@@ -361,15 +361,13 @@ def heuristic(game: Game, depth: int = 7) -> str:
 # ---------------------------------------------------------------------- fork experiments
 
 
-# A fork's verses. Flappy punishes a pilot that is asked only every few frames and sees only
-# so far: sometimes no flap on its beat fits the gap, or it threads one gap onto a line the
-# next cannot be reached from. So each verse steers for a different part of the gap (aim, a
-# share of the gap from its top) and opens by gliding a few frames (wait), which moves every
-# later decision onto a different beat than the bird that died. Jev still makes every choice.
+# Cover both first-frame choices: gliding even one frame can doom a late checkpoint.
+# The other two openings delay a flap, shifting subsequent Jev decisions off the old beat.
+# Once the short opening ends, Jev chooses again with this verse's aim in the visible gap.
 VERSES = (
-    ((0.30, 1), (0.80, 2), (0.42, 4), (0.68, 3)),
-    ((0.20, 2), (0.90, 4), (0.36, 1), (0.74, 5)),
-    ((0.25, 4), (0.85, 1), (0.48, 5), (0.62, 2)),
+    ((0.30, "flap", 1), (0.80, "glide", 1), (0.42, "delay", 2), (0.68, "delay", 4)),
+    ((0.20, "flap", 2), (0.90, "glide", 2), (0.36, "delay", 3), (0.74, "delay", 5)),
+    ((0.25, "flap", 4), (0.85, "glide", 4), (0.48, "delay", 1), (0.62, "delay", 3)),
 )
 
 
@@ -384,23 +382,26 @@ def aim_words(aim: float) -> str:
 
 
 def experiments(checkpoint_x: int, death_x: int) -> list[dict]:
-    """The verses of a fork, four to a race. A verse is an intent handed to the worker, not
-    a script of buttons: where to steer, and how long to glide before the first decision."""
+    """Four short, different openings per race, followed by fresh Jev decisions."""
     import hashlib
     import json
 
     plans = []
     for race in VERSES:
-        for aim, wait in race:
-            signature = json.dumps([checkpoint_x, death_x, aim, wait])
+        for aim, opening, frames in race:
+            steps = [{"action": "glide" if opening == "delay" else opening, "frames": frames}]
+            if opening == "delay":
+                steps.append({"action": "flap", "frames": 1})
+            label = f"glides {frames}f then flaps" if opening == "delay" else f"{opening}s now"
+            signature = json.dumps([checkpoint_x, death_x, aim, steps])
             plans.append(
                 {
                     "experiment_id": hashlib.sha256(signature.encode()).hexdigest()[:12],
-                    "label": f"{aim_words(aim)}, flaps {wait}f off the beat",
+                    "label": f"{aim_words(aim)}, {label}",
                     "aim": aim,
                     "x_min": checkpoint_x,
                     "x_max": death_x + 16,
-                    "steps": [{"action": "glide", "frames": wait}],
+                    "steps": steps,
                     "status": "waiting",
                     "step_index": 0,
                 }

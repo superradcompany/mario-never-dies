@@ -107,7 +107,13 @@ class MicroVMBackend:
         seed: int | None = None,
     ):
         worker = (
-            ["mnd.bird_guest", "--target", str(int(stage)), "--seed", str(seed or 123)]
+            [
+                "mnd.bird_guest",
+                "--target",
+                "0" if stage == "endless" else str(int(stage)),
+                "--seed",
+                str(seed or 123),
+            ]
             if game == "bird"
             else ["mnd.guest", "--env", f"SuperMarioBros-{stage}-v0"]
         )

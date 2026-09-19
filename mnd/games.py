@@ -6,6 +6,8 @@ GAMES = {
         "title": "mario",
         "fps": 60,
         "frame_step": 2,  # the NES worker keeps every second frame
+        "checkpoint_frames": 150,
+        "rewind_margin": 96,
         "size": [256, 240],
         "stages": ("1-1", "1-2", "1-3", "1-4"),
     },
@@ -13,8 +15,10 @@ GAMES = {
         "title": "flappy",
         "fps": 30,
         "frame_step": 1,
+        "checkpoint_frames": 12,  # two decisions, 0.4 seconds of game time
+        "rewind_margin": 0,  # try the latest copy first; failed races can fall back
         "size": [288, 512],
-        "stages": ("25",),  # a stage is a number of pipes to pass
+        "stages": ("endless",),  # no pipe target; the Stop button ends the flight
         "soon": True,  # on the menu, not open yet: only a preview request may start it
     },
 }

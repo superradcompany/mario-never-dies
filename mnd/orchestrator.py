@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bird import FRAMES_PER_DECISION, SCROLL
 from .bird import experiments as bird_experiments
 from .games import GAMES
 from .protocol import TERMINAL, append_json, atomic_json, retry_evidence
@@ -19,21 +20,27 @@ from .recovery import experiments
 class Settings:
     max_slots: int = 3
     intermission: bool = False  # stop at each flag until the browser says go
-    rewind_margin: int = 96
-    max_rewinds: int = 20
+    rewind_margin: int | None = None
+    max_rewinds: int = 20  # zero disables the total rewind limit
     max_attempts: int = 4
     poll_seconds: float = 0.1
-    run_timeout: float = 1200
+    run_timeout: float = 1200  # zero disables the total wall-clock limit
     stall_timeout: float = 45
     race_timeout: float = 45
     multiverse: bool = True
     races_per_checkpoint: int = 2
-    checkpoint_frames: int = 150
+    checkpoint_frames: int | None = None
     max_decisions: int = 2000
     policy: str = "typesafe"
     stages: tuple[str, ...] = ("1-1",)
     game: str = "mario"
     seed: int | None = None
+
+    def __post_init__(self):
+        # Defaults follow the game's speed; explicit probe/CLI overrides still win.
+        for name in ("checkpoint_frames", "rewind_margin"):
+            if getattr(self, name) is None:
+                setattr(self, name, GAMES[self.game][name])
 
 
 @dataclass
@@ -59,6 +66,7 @@ class Orchestrator:
         self.unpictured = {}  # slot name -> sandbox it was copied from, until a frame arrives
         self.tried_experiments = set()
         self.early_race_death = None
+        self.rapid_race_failure = False
         self.experience = []
         self.sequence = self.rewinds = 0
         self.trunk, self.status = None, "starting"
@@ -121,7 +129,7 @@ class Orchestrator:
     def check_deadline(self):
         if self.stop():
             raise asyncio.CancelledError("Stopped from browser")
-        if self.elapsed() > self.settings.run_timeout:
+        if self.settings.run_timeout > 0 and self.elapsed() > self.settings.run_timeout:
             raise TimeoutError("Run exceeded its wall-clock budget")
 
     def running_vms(self):
@@ -245,7 +253,20 @@ class Orchestrator:
             capture_and_pause_ms=(time.perf_counter() - started) * 1000,
         )
         while len(self.slots) > self.settings.max_slots:
-            old = self.slots.pop(0)
+            index = 0
+            if self.settings.game == "bird" and self.settings.max_slots > 1:
+                # At the browser's 12-copy limit, protect the newest eight and retain
+                # four older anchors. Thin the densest older pair, keeping the first
+                # copy as a last resort. Frequent saves must not erase every way out.
+                recent = max(1, self.settings.max_slots * 2 // 3)
+                index = min(
+                    range(1, len(self.slots) - recent),
+                    key=lambda i: (
+                        self.slots[i + 1].state["frame"] - self.slots[i - 1].state["frame"]
+                    ),
+                )
+            old = self.slots.pop(index)
+            self.unpictured.pop(old.name, None)
             await self.backend.kill(old.name)
             self.roles[old.name] = "retired"
         await self.release(name, state)
@@ -272,13 +293,14 @@ class Orchestrator:
     async def rewind(self, dead, state):
         self.rewinds += 1
         self.event("death", sandbox=dead, frame=state["frame"], x_pos=state["x_pos"])
-        if self.rewinds > self.settings.max_rewinds:
+        if self.settings.max_rewinds > 0 and self.rewinds > self.settings.max_rewinds:
             raise RuntimeError("Rewind budget exhausted")
         if not self.slots:
             raise RuntimeError("Guest died before the initial checkpoint")
         await self.retire(dead, "dead")
         hazard = self.hazard(state["x_pos"])
-        death_frame = state["frame"]
+        death_frame = state.get("flight_frame", state["frame"])
+        death_score = state.get("score", 0)
         # Which move to avoid next time is a Mario idea; a bird's verses differ by intent.
         mario = self.settings.game == "mario"
         evidence = retry_evidence(state.get("history", []), state["x_pos"]) if mario else None
@@ -306,16 +328,20 @@ class Orchestrator:
         self.slots = self.slots[: target_index + 1]
         if self.settings.multiverse:
             # Every death forks: four futures from the copy, never a single retry first.
-            # When none of them makes it, fork again with fresh experiments, and after
-            # races_per_checkpoint failures fall back one copy and fork from there.
+            # Flappy backs off in game time, doubling the distance on each fallback.
+            # A copy whose four trials all crash within two decisions gets one race,
+            # rather than spending the remaining attempts on that same late state.
             failed_here = 0
+            backtrack_frames = self.settings.checkpoint_frames
             while True:
-                survivor = await self.race(target, hazard["x"], death_frame=death_frame)
+                survivor = await self.race(
+                    target, hazard["x"], death_frame=death_frame, death_score=death_score
+                )
                 if survivor:
                     return survivor
                 exhausted = bool(self.events) and self.events[-1]["type"] == "experiments_exhausted"
                 if not exhausted:
-                    self.event("race_failed", checkpoint=target.name)
+                    self.event("race_failed", checkpoint=target.name, rapid=self.rapid_race_failure)
                     failed_here += 1
                 self.avoid.clear()
                 if self.early_race_death:
@@ -325,7 +351,8 @@ class Orchestrator:
                     earlier = self.early_race_death
                     previous_x = hazard["x"]
                     hazard = self.hazard(earlier["x_pos"])
-                    death_frame = earlier["frame"]
+                    death_frame = earlier.get("flight_frame", earlier["frame"])
+                    death_score = earlier.get("score", 0)
                     evidence = retry_evidence(earlier.get("history", []), earlier["x_pos"])
                     if evidence and mario:
                         self.avoid.append(evidence)
@@ -337,7 +364,11 @@ class Orchestrator:
                         frame=death_frame,
                         reason="All candidates died here before their experiments began",
                     )
-                if not exhausted and failed_here < self.settings.races_per_checkpoint:
+                if (
+                    not exhausted
+                    and not self.rapid_race_failure
+                    and failed_here < self.settings.races_per_checkpoint
+                ):
                     continue
                 index = self.slots.index(target)
                 if index == 0:
@@ -345,7 +376,27 @@ class Orchestrator:
                         "Recovery exhausted at the oldest retained checkpoint; "
                         "no candidate qualified (see experiment outcomes)"
                     )
+                previous = target
+                if not mario:
+                    cutoff = death_frame - backtrack_frames
+                    eligible = [i for i in range(index) if self.slots[i].state["frame"] <= cutoff]
+                    next_index = eligible[-1] if eligible else 0
+                    # Round each 0.4/0.8/1.6s lookback down to a retained copy.
+                    # Searching strictly before the current copy guarantees progress
+                    # even when the remaining older anchors are widely spaced.
+                    backtrack_frames *= 2
+                    index = next_index + 1
                 target = self.slots[index - 1]
+                self.event(
+                    "recovery_backtrack",
+                    parent=previous.name,
+                    checkpoint=target.name,
+                    from_frame=previous.state["frame"],
+                    frame=target.state["frame"],
+                    reason="all four died within two decisions"
+                    if self.rapid_race_failure
+                    else "checkpoint trials exhausted",
+                )
                 hazard["attempts"] = 1
                 failed_here = 0
                 for slot in self.slots[index:]:
@@ -399,8 +450,10 @@ class Orchestrator:
         )
         return child
 
-    async def race(self, target, death_x, *, death_frame=None):
+    async def race(self, target, death_x, *, death_frame=None, death_score=0):
         self.early_race_death = None
+        self.rapid_race_failure = False
+        bird = self.settings.game == "bird"
         # API time is not gameplay time. Earlier copies may need hundreds of
         # decisions to reach a trial; bound that approach by the previously
         # observed journey plus one checkpoint interval, not a 45-second race.
@@ -434,10 +487,11 @@ class Orchestrator:
             experiments=dict(zip(children, plans, strict=True)),
             hazard_x=death_x,
             approach_frame_budget=approach_frames,
+            required_score=death_score + 1 if bird else None,
         )
         active = []
         assigned = dict(zip(children, plans, strict=True))
-        deadlines, early_deaths = {}, []
+        deadlines, early_deaths, quick_deaths = {}, [], []
 
         def record(child, outcome, state=None):
             plan = assigned[child]
@@ -473,6 +527,8 @@ class Orchestrator:
                 outcome=outcome,
                 x_pos=state.get("x_pos"),
                 frame=state.get("frame"),
+                flight_frame=state.get("flight_frame"),
+                score=state.get("score"),
                 sequence_status=sequence_status,
                 sequence_frames=used_frames,
                 trial_started=child in deadlines,
@@ -509,23 +565,40 @@ class Orchestrator:
                         x_pos=state["x_pos"],
                         experiment_id=plan["experiment_id"],
                     )
-                # A trial has made it once it is well past the death, or waits at a
-                # milestone gate beyond it (a cleared pipe): promoted there, the new
-                # trunk is copied at that gate before it flies on.
-                beyond = state["x_pos"] > death_x + 64 or (
-                    state["phase"] == "gate"
-                    and state.get("milestone")
-                    and state["x_pos"] > death_x
-                    and (child, state["gate"]) not in self.released
+                # Flappy must clear the pipe at which the original died. Passing
+                # death_x+64 can still leave the bird inside that pipe. Score is
+                # awarded only after its trailing edge has moved behind the bird.
+                beyond = (
+                    state.get("score", 0) > death_score and state["x_pos"] > death_x
+                    if bird
+                    else state["x_pos"] > death_x + 64
+                    or (
+                        state["phase"] == "gate"
+                        and state.get("milestone")
+                        and state["x_pos"] > death_x
+                        and (child, state["gate"]) not in self.released
+                    )
                 )
                 if state["phase"] == "clear" or (
                     state["phase"] not in TERMINAL
+                    and state["phase"] != "dying"
                     and beyond
                     and (state.get("force_pending") or {}).get("status")
                     not in {"waiting", "active"}
                 ):
                     qualified.append((child, state))
                 elif state["phase"] in TERMINAL:
+                    # Cosmetic falling frames and API latency do not count as survival.
+                    # x/SCROLL also handles recordings made before flight_frame existed.
+                    if (
+                        bird
+                        and state["phase"] == "dead"
+                        and 0
+                        <= state.get("flight_frame", state["x_pos"] // SCROLL)
+                        - target.state.get("flight_frame", target.state["x_pos"] // SCROLL)
+                        <= 2 * FRAMES_PER_DECISION
+                    ):
+                        quick_deaths.append(child)
                     if (
                         state["phase"] == "dead"
                         and child not in deadlines
@@ -583,6 +656,8 @@ class Orchestrator:
             if paused:
                 deadlines = {name: end + paused["paused_for"] for name, end in deadlines.items()}
             await asyncio.sleep(self.settings.poll_seconds)
+        # Startup errors/timeouts are not evidence that a checkpoint is doomed.
+        self.rapid_race_failure = len(quick_deaths) == len(children) == 4
         if (
             early_deaths
             and len(early_deaths) == started_children
@@ -698,6 +773,20 @@ class Orchestrator:
             self.status = "failed"
             self.event("failed", error=failure)
         finally:
+            # Active timelines have not been retired/exported yet. Quiesce and pull
+            # them before deleting their disks, including Stop during a four-way race.
+            # Frozen checkpoints contain only ancestors; never try reading paused VMs.
+            names = [name for name in self.running_vms() if name not in self.exported]
+            exports = await asyncio.gather(
+                *(self.export(name) for name in names), return_exceptions=True
+            )
+            recording_errors = [
+                {"sandbox": name, "error": type(result).__name__}
+                for name, result in zip(names, exports, strict=True)
+                if isinstance(result, BaseException)
+            ]
+            # A failed export must never strand VMs or prevent the other recordings
+            # being saved. Keep its error separate from the VM cleanup result.
             cleanup = await self.backend.cleanup()
             if cleanup:
                 self.status = "cleanup_failed"
@@ -712,6 +801,7 @@ class Orchestrator:
                     "completed_stages": self.completed_stages,
                     "error": failure,
                     "cleanup_errors": cleanup,
+                    "recording_errors": recording_errors,
                 },
             )
             self.publish()
