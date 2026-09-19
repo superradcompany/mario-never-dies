@@ -14,6 +14,16 @@ You can watch it unfold in your browser, with the game alongside **a map of its 
 
 Needs Python 3.13+, uv, and a microsandbox-supported host. Export `TYPESAFE_API_KEY`, or point `--env-file` at a file that sets it.
 
+Clone the repository, then run the demo from its directory:
+
+```sh
+git clone https://github.com/superradcompany/mario-never-dies.git
+```
+
+```sh
+cd mario-never-dies
+```
+
 ```sh
 uv run mnd
 ```
