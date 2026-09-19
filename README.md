@@ -150,6 +150,10 @@ Forked branches get the same instructions and their own state. What differs is t
 
 [Faadil Shaik's typesafe-mario](https://github.com/fhshaik/typesafe-mario) supplies the RAM parser and Jev policy; [TypeSafe AI](https://typesafe.ai) supplies Jev; [gym-super-mario-bros](https://github.com/Kautenja/gym-super-mario-bros) and [nes-py](https://github.com/Kautenja/nes-py) supply the emulator; [microsandbox](https://github.com/superradcompany/microsandbox) supplies whole-machine branching.
 
+## License
+
+[Apache License 2.0](LICENSE).
+
 <br />
 
 <p align="center">

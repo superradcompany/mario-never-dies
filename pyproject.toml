@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mario-never-dies"
 version = "0.1.0"
 description = "Branch a running Mario microVM and continue from a surviving timeline"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = ["microsandbox>=0.7.2,<0.8", "python-dotenv>=1.0"]
 
