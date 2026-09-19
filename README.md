@@ -12,7 +12,7 @@ You can watch it unfold in your browser, with the game alongside **a map of its 
 
 ## Run it
 
-Needs Python 3.13+, uv, and a microsandbox-supported host. Export `TYPESAFE_API_KEY`, or point `--env-file` at a file that sets it.
+Needs Python 3.13+, uv, and a [microsandbox-supported host](https://docs.microsandbox.dev/getting-started/quickstart). Export `TYPESAFE_API_KEY`, or point `--env-file` at a file that sets it.
 
 Clone the repository, then run the demo from its directory:
 
