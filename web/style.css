@@ -105,7 +105,8 @@ main { display: grid; grid-template-rows: minmax(0, 1fr) var(--deck) auto var(--
 @keyframes cc-lift { to { top: 36%; } }
 @keyframes cc-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .clearcard * { animation: none !important; } .cc-stamp { top: 36%; } }
-.frame { position: relative; min-width: 0; width: min(100cqw - 40px, (100cqh - 16px) * 16 / 15); height: min(100cqh - 16px, (100cqw - 40px) * 15 / 16); }
+/* the picture has the game's shape (--aw : --ah, set for a tall game further down); the page around it is the same for every game */
+.frame { position: relative; min-width: 0; width: min(100cqw - 40px, (100cqh - 16px) * var(--aw, 16) / var(--ah, 15)); height: min(100cqh - 16px, (100cqw - 40px) * var(--ah, 15) / var(--aw, 16)); }
 .screen { height: 100%; }
 .screen { position: relative; min-width: 0; background: #000; border: 1px solid var(--line); display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr; gap: 0; overflow: hidden; }
 .screen.grid { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; background: var(--line); }
@@ -279,30 +280,26 @@ body.recording .scrub-hint, body.recording .toast { display: none; }
    captions. app.js measures where the picture is (placeTalk) and hands it over as variables. */
 main { position: relative; }
 /* with the commentary out of the flow, its row goes too, or the timeline would slide into it */
-body.talk-side:not(.tall) main, body.talk-sub:not(.tall) main { grid-template-rows: minmax(0, 1fr) var(--deck) var(--map); }
+body.talk-side main, body.talk-sub main { grid-template-rows: minmax(0, 1fr) var(--deck) var(--map); }
 .focus-prev { display: none; }
-body.talk-side:not(.tall) .focus, body.talk-sub .focus { position: absolute; z-index: 4; margin: 0; min-height: 0; pointer-events: none; }
-body.talk-side:not(.tall) .focus { left: 28px; top: var(--stage-top, 0); height: var(--stage-h, 50%); width: calc(var(--frame-left, 30vw) - 60px); padding: 0; flex-direction: column; align-items: flex-start; justify-content: center; gap: 16px; text-align: left; font-size: calc(clamp(16px, 1.55vw, 26px) * var(--label-k, 1)); }
-body.talk-side:not(.tall) .focus > span:first-child { max-width: none; }
-body.talk-side:not(.tall) .focus-prev { display: block; order: -1; font-size: .6em; line-height: 1.5; color: var(--dim); }
-body.talk-side:not(.tall) .focus-prev em { background: transparent; color: inherit; padding: 0; }
-body.talk-side:not(.tall) .stamp, body.talk-sub .stamp { font-size: calc(clamp(20px, 2.1vw, 34px) * var(--label-k, 1)); }
+body.talk-side .focus, body.talk-sub .focus { position: absolute; z-index: 4; margin: 0; min-height: 0; pointer-events: none; }
+body.talk-side .focus { left: 28px; top: var(--stage-top, 0); height: var(--stage-h, 50%); width: min(calc(var(--frame-left, 30vw) - 60px), 560px); padding: 0; flex-direction: column; align-items: flex-start; justify-content: center; gap: 16px; text-align: left; font-size: calc(clamp(16px, 1.55vw, 26px) * var(--label-k, 1)); }
+body.talk-side .focus > span:first-child { max-width: none; }
+body.talk-side .focus-prev { display: block; order: -1; font-size: .6em; line-height: 1.5; color: var(--dim); }
+body.talk-side .focus-prev em { background: transparent; color: inherit; padding: 0; }
+body.talk-side .stamp, body.talk-sub .stamp { font-size: calc(clamp(20px, 2.1vw, 34px) * var(--label-k, 1)); }
 /* on the picture: over the lowest ground row, there while a line is new and gone after */
 body.talk-sub .focus { left: var(--frame-left, 25%); width: var(--frame-w, 50%); bottom: var(--sub-bottom, 0); padding: calc(var(--talk, 19px) * .62) calc(var(--talk, 19px) * .95); background: rgba(14, 14, 18, .74); font-size: var(--talk, 19px); opacity: 0; transition: opacity .4s ease; }
 body.talk-sub .focus.fresh { opacity: 1; transition-duration: .12s; }
-/* the tall layout gives the commentary a grid cell; a positioned grid child is placed inside its
-   cell, so the caption has to leave the cell to land on the picture */
-body.talk-sub.tall .focus { grid-area: auto; min-height: 0; padding: calc(var(--talk, 19px) * .62) calc(var(--talk, 19px) * .95); justify-content: center; text-align: center; }
 body.talk-sub .stamp { background: rgba(14, 14, 18, .92); }
 
 /* theater: a key leaves only the game. the controls and the way out show while the pointer moves */
 body.theater { grid-template-rows: minmax(0, 1fr); }   /* the bar is gone, so the page is one row: the game */
 body.theater .bar, body.theater .map, body.theater .edge { display: none; }
-body.theater main, body.theater.tall main, body.theater.talk-sub main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-body.theater .stage, body.theater.tall .stage { grid-column: 1; grid-row: 1; width: auto; padding: 0; border: 0; container-type: size; place-items: center; }
-body.theater .frame { width: min(100cqw, 100cqh * 16 / 15); height: min(100cqh, 100cqw * 15 / 16); }
-body.theater.tall .frame { width: min(100cqw, 100cqh * 9 / 16); height: auto; aspect-ratio: 9 / 16; max-height: none; }
-body.theater .deck, body.theater.tall .deck { position: fixed; z-index: 30; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(920px, 92vw); box-sizing: border-box; background: rgba(14, 14, 18, .84); border: 1px solid var(--line); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+body.theater main, body.theater.talk-sub main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+body.theater .stage { grid-column: 1; grid-row: 1; width: auto; padding: 0; border: 0; container-type: size; place-items: center; }
+body.theater .frame { width: min(100cqw, 100cqh * var(--aw, 16) / var(--ah, 15)); height: min(100cqh, 100cqw * var(--ah, 15) / var(--aw, 16)); }
+body.theater .deck { position: fixed; z-index: 30; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(920px, 92vw); box-sizing: border-box; background: rgba(14, 14, 18, .84); border: 1px solid var(--line); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
 body.theater.peeking .deck { opacity: 1; pointer-events: auto; }
 body.theater.peeking.talk-sub .focus { bottom: calc(var(--sub-bottom, 0px) + 72px); }   /* the caption steps over the controls while they show */
 body.theater .overlay { inset: 0; }
@@ -635,7 +632,6 @@ button.with-icon path { fill: currentColor; }
 /* A cabinet marked soon: on the menu, not open. Its picture sits dimmed until hover breaks it
    up (the dither and the tears are drawn on its canvas by makeSoonGlitch). The glitch colours
    are the accent's siblings: its three channel values in every other order. */
-.cabinet.soon { cursor: var(--cur-arrow); }
 .cabinet.soon:hover, .cabinet.soon:focus-visible { border-color: var(--line); background: rgba(14, 14, 18, .6); }
 .cabinet.soon .cab-screen canvas { filter: grayscale(.5) brightness(.5); transition: filter .12s; }
 .cabinet.soon:hover .cab-screen canvas, .cabinet.soon:focus-visible .cab-screen canvas { filter: none; }
@@ -666,16 +662,11 @@ button.with-icon path { fill: currentColor; }
 body[data-game=bird] .pad:not(.pad-one) { display: none; }
 body[data-game=bird] .pad-one { display: block; }
 
-/* ---------------------------------------------------------------- a tall game on a wide page
-   The game takes the full height on the left; the story, the transport, the timeline and
-   the dock stack on the right. A fork splits the tall frame 2x2, the same shape again. */
-body.tall { --map: 330px; --dock: 300px; }
-body.tall main { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto var(--deck) minmax(0, 1fr) var(--map); }
-body.tall .stage { grid-column: 1; grid-row: 1 / -1; container-type: normal; place-items: start center; padding: 0; width: min(calc((100vh - var(--bar)) * 9 / 16), 46vw); border-right: 1px solid var(--line); }
-body.tall .frame { width: 100%; height: auto; aspect-ratio: 9 / 16; max-height: 100%; }
-body.tall .focus { grid-column: 2; grid-row: 1; justify-content: flex-start; text-align: left; padding: 30px 28px 16px; min-height: 88px; }
-body.tall .deck { grid-column: 2; grid-row: 2; }
-body.tall .map { grid-column: 2; grid-row: 4; }
+/* ---------------------------------------------------------------- a tall game
+   The same page as a wide one: the game over the playback row, the timeline and the dock under
+   them. Only the picture is taller than wide, and so are its thumbnails. A fork splits the tall
+   picture 2x2, the same shape again. */
+body.tall { --aw: 9; --ah: 16; }
 .shelf.tall .strip-item img { width: 54px; height: 96px; }
 .shelf.tall .strip-all { width: 56px; height: 98px; }
 .library-grid.tall { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .bird import ACTIONS, AIM, FRAMES_PER_DECISION, Game, heuristic, validate_sequence
+from .games import GAMES
 from .protocol import Gate, GuestStopped, append_json, atomic_json
 from .recovery import consume_sequence, sequence_chunk
 
@@ -110,7 +111,8 @@ def run(args):
     history = deque(maxlen=16)
     timeline, control = "initial", {"avoid": [], "force": None}
     decision_index = checkpoint_seq = 0
-    gate_score = -1  # a new copy is offered at the start and after every pipe
+    gate_score = -1  # a copy at the start, between pipes, and after each cleared pipe
+    next_checkpoint = 0
     previous_action = None
     last_heartbeat, last_decision = {}, {}
     timeline_tokens = timeline_decisions = 0
@@ -120,9 +122,12 @@ def run(args):
         last_heartbeat = {
             "timeline": timeline,
             "game": "bird",
-            "stage": str(args.target),
+            "stage": str(args.target) if args.target else "endless",
             "phase": phase,
             "frame": game.frame,
+            # The crash animation advances frame, but must not make a doomed copy
+            # appear to have survived longer when the host decides how far to rewind.
+            "flight_frame": game.flown,
             "decision": decision_index,
             "checkpoint_seq": checkpoint_seq,
             "x_pos": game.x_pos,
@@ -160,9 +165,6 @@ def run(args):
         while True:
             if (root / "stop.json").exists():
                 raise GuestStopped
-            if game.score >= args.target:
-                publish("clear")
-                break
             if game.dead:
                 publish("dying")
                 for _ in range(60):
@@ -172,17 +174,26 @@ def run(args):
                         break
                 publish("dead")
                 break
-            if decision_index >= args.max_decisions:
+            # Passing the final pipe and hitting the ground can happen on one frame.
+            # A score increment counts as a win only if the bird survived that frame.
+            if args.target > 0 and game.score >= args.target:
+                publish("clear")
+                break
+            if args.max_decisions > 0 and decision_index >= args.max_decisions:
                 publish("limit", reason="max_decisions")
                 break
             force = control.get("force")
-            if game.score != gate_score and not (force and force.get("status") == "active"):
+            pipe_cleared = game.score > 0 and game.score != gate_score
+            if (game.score != gate_score or game.frame >= next_checkpoint) and not (
+                force and force.get("status") == "active"
+            ):
                 gate_score = game.score
+                next_checkpoint = game.frame + args.checkpoint_frames
                 checkpoint_seq += 1
-                # A cleared pipe is a milestone: a trial that reaches this gate has beaten
-                # the pipe that killed its parent, and the copy is taken right here.
+                # Only an actual pipe clear is a milestone. A periodic gate must not
+                # promote a racing child early just because it passed an older pipe.
                 control = Gate(root, validate=validate_sequence).wait(
-                    publish("preparing_gate", milestone=game.score > 0)
+                    publish("preparing_gate", milestone=pipe_cleared)
                 )
                 if timeline != control["timeline"]:
                     timeline_tokens = timeline_decisions = 0
@@ -295,15 +306,26 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("/var/mnd"))
-    parser.add_argument("--target", type=int, default=25, help="pipes to pass for a clear")
+    parser.add_argument(
+        "--target", type=int, default=0, help="pipes to pass; 0 plays until stopped"
+    )
     parser.add_argument("--policy", choices=("typesafe", "heuristic"), default="typesafe")
     parser.add_argument("--frames-per-decision", type=int, default=FRAMES_PER_DECISION)
-    parser.add_argument("--checkpoint-frames", type=int, default=0, help="unused: a copy per pipe")
-    parser.add_argument("--max-decisions", type=int, default=6000)
+    parser.add_argument(
+        "--checkpoint-frames",
+        type=int,
+        default=GAMES["bird"]["checkpoint_frames"],
+        help="frames between copies, also saving after each cleared pipe",
+    )
+    parser.add_argument(
+        "--max-decisions", type=int, default=0, help="decision limit; 0 is unlimited"
+    )
     parser.add_argument("--seed", type=int, default=123)
     args = parser.parse_args()
-    if min(args.target, args.frames_per_decision, args.max_decisions) < 1:
-        parser.error("target, frame and decision limits must be positive")
+    if min(args.frames_per_decision, args.checkpoint_frames) < 1:
+        parser.error("frame intervals must be positive")
+    if min(args.target, args.max_decisions) < 0:
+        parser.error("target and decision limits must be nonnegative; 0 is unlimited")
     run(args)
 
 
