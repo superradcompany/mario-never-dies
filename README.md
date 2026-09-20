@@ -6,7 +6,7 @@
 
 **What if game over was just a fork in the road?**
 
-What if Mario could try another future every time he died? In this demo, **Jev chooses its moves** while [microsandbox](https://github.com/superradcompany/microsandbox) periodically **freezes a copy of the entire running machine**. Every time Mario dies, microsandbox splits the last checkpoint into **four VM copies**. Each is a verse that tries a different approach, and **the one that makes it becomes canon**.
+What if Mario could try another future every time he died? In this demo, **Jev chooses his moves** while [microsandbox](https://github.com/superradcompany/microsandbox) periodically **freezes a copy of the entire running machine**. Every time Mario dies, microsandbox splits the last checkpoint into **four VM copies**. Each is a verse that tries a different approach, and **the one that makes it becomes canon**.
 
 You can watch it unfold in your browser, with the game alongside **a map of its branching timelines**.
 
